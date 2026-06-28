@@ -1,0 +1,35 @@
+# ═══════════════════════════════════════════════════════════
+#  .dockerignore - juribook-auth-service
+#  Exclut les fichiers inutiles du contexte Docker
+#  pour accélérer le build et réduire la taille de l'image
+# ═══════════════════════════════════════════════════════════
+
+# Build Maven (répertoire généré)
+target/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.code-workspace
+
+# Maven wrapper (pas nécessaire dans Docker)
+.mvn/
+mvnw
+mvnw.cmd
+
+# Documentation
+README.md
+*.md
+
+# Fichiers de CI/CD
+.github/
+
+# Fichiers d'environnement locaux
+.env
+.env.*

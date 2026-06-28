@@ -1,0 +1,64 @@
+spring:
+  application:
+    name: auth-service
+
+  # ═══════════════════════════════════════════════════════════
+  #  Connexion PostgreSQL (database per service)
+  #  En conteneur Docker, surchargé par SPRING_DATASOURCE_URL
+  # ═══════════════════════════════════════════════════════════
+  datasource:
+    url: jdbc:postgresql://localhost:5432/authdb
+    username: juribook
+    password: juribook
+    driver-class-name: org.postgresql.Driver
+
+  # ═══════════════════════════════════════════════════════════
+  #  JPA / Hibernate
+  #  ddl-auto: validate → Hibernate vérifie le schéma,
+  #  c'est Flyway qui gère les migrations
+  # ═══════════════════════════════════════════════════════════
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+
+  # ═══════════════════════════════════════════════════════════
+  #  Flyway
+  # ═══════════════════════════════════════════════════════════
+  flyway:
+    enabled: true
+
+  # ═══════════════════════════════════════════════════════════
+  #  Kafka
+  #  En conteneur, surchargé par SPRING_KAFKA_BOOTSTRAP_SERVERS
+  # ═══════════════════════════════════════════════════════════
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+
+server:
+  port: 8081
+
+# ═══════════════════════════════════════════════════════════
+#  JWT
+#  Secret min 256 bits pour HS256.
+#  En production, surcharger via JWT_SECRET (variable d'env)
+# ═══════════════════════════════════════════════════════════
+jwt:
+  secret: juribook-secret-key-must-be-at-least-256-bits-long-for-hs256
+  expiration: 86400000 # 24h en ms
+
+# ═══════════════════════════════════════════════════════════
+#  Springdoc / Swagger UI
+# ═══════════════════════════════════════════════════════════
+springdoc:
+  api-docs:
+    path: /v3/api-docs        # endpoint JSON de la spec OpenAPI
+  swagger-ui:
+    path: /swagger-ui.html    # URL d'accès à l'interface Swagger
+    tags-sorter: alpha         # trie les tags alphabétiquement
+    operations-sorter: alpha   # trie les opérations alphabétiquement
+    display-request-duration: true
+  show-actuator: false         # ne pas exposer les endpoints Actuator dans Swagger
