@@ -50,7 +50,7 @@ public class SecurityConfig {
     };
 
     /**
-     * Bean PasswordEncoder — BCrypt avec force 10 (défaut).
+     * Bean PasswordEncoder - BCrypt avec force 10 (défaut).
      * Injecté dans AuthService via @RequiredArgsConstructor.
      * ⚠️ Doit être dans un @Configuration pour être visible par Spring.
      */
