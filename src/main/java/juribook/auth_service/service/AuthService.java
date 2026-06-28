@@ -1,11 +1,14 @@
 package juribook.auth_service.service;
 
+import juribook.auth_service.dto.request.LoginRequest;
 import juribook.auth_service.dto.request.RegisterClientRequest;
 import juribook.auth_service.dto.request.RegisterLawyerRequest;
+import juribook.auth_service.dto.response.LoginResponse;
 import juribook.auth_service.dto.response.RegisterClientResponse;
 import juribook.auth_service.entity.LawyerStatus;
 import juribook.auth_service.entity.Role;
 import juribook.auth_service.entity.User;
+import juribook.auth_service.exception.UserNotFoundException;
 import juribook.auth_service.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -76,5 +79,32 @@ public class AuthService {
         userRepository.save(user);
         log.info("Nouvel avocat inscrit : email={}, barNumber={}, status=PENDING",
                 user.getEmail(), user.getBarNumber());
+    }
+
+    // ── Login ────────────────────────────────────────────────
+    @Transactional
+    public LoginResponse login(LoginRequest request) {
+ 
+        User user = userRepository.findByEmail(request.getEmail().toLowerCase().trim())
+                .orElseThrow(() -> new UserNotFoundException("Email ou mot de passe incorrect"));
+ 
+        if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
+            throw new UserNotFoundException("Email ou mot de passe incorrect");
+        }
+ 
+        if (!user.isEnabled()) {
+            throw new IllegalArgumentException("Ce compte est désactivé");
+        }
+ 
+ 
+        log.info("Connexion réussie : id={}, email={}, role={}", user.getId(), user.getEmail(), user.getRole());
+ 
+        return LoginResponse.builder()
+                .type("Bearer")
+                .id(user.getId())
+                .name(user.getName())
+                .email(user.getEmail())
+                .role(user.getRole())
+                .build();
     }
 }

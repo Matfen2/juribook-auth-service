@@ -1,7 +1,9 @@
 package juribook.auth_service.controller;
 
+import juribook.auth_service.dto.request.LoginRequest;
 import juribook.auth_service.dto.request.RegisterClientRequest;
 import juribook.auth_service.dto.request.RegisterLawyerRequest;
+import juribook.auth_service.dto.response.LoginResponse;
 import juribook.auth_service.dto.response.RegisterClientResponse;
 import juribook.auth_service.service.AuthService;
 import lombok.RequiredArgsConstructor;
@@ -47,5 +49,17 @@ public class AuthController {
             @Valid @RequestBody RegisterLawyerRequest request) {
         authService.registerLawyer(request);
         return ResponseEntity.status(HttpStatus.CREATED).build();
+    }
+
+    // ── POST /api/auth/login ─────────────────────────────────
+    @PostMapping("/login")
+    @Operation(summary = "Connexion", description = "Retourne un access token JWT (24h) + refresh token (7j)")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Connexion réussie"),
+        @ApiResponse(responseCode = "400", description = "Données invalides"),
+        @ApiResponse(responseCode = "404", description = "Email ou mot de passe incorrect")
+    })
+    public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
+        return ResponseEntity.ok(authService.login(request));
     }
 }
