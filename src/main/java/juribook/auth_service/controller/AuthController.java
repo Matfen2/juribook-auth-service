@@ -1,6 +1,7 @@
 package juribook.auth_service.controller;
 
 import juribook.auth_service.dto.request.RegisterClientRequest;
+import juribook.auth_service.dto.request.RegisterLawyerRequest;
 import juribook.auth_service.dto.response.RegisterClientResponse;
 import juribook.auth_service.service.AuthService;
 import lombok.RequiredArgsConstructor;
@@ -33,4 +34,18 @@ public class AuthController {
         return ResponseEntity.status(HttpStatus.CREATED).body(authService.registerClient(request));
     }
 
+    // ── POST /api/auth/register/lawyer ───────────────────────
+    // registerLawyer() retourne void → ResponseEntity<Void>
+    @PostMapping("/register/lawyer")
+    @Operation(summary = "Inscription avocat", description = "Statut PENDING - en attente de validation admin")
+    @ApiResponses({
+        @ApiResponse(responseCode = "201", description = "Compte avocat créé, statut PENDING"),
+        @ApiResponse(responseCode = "400", description = "Données invalides"),
+        @ApiResponse(responseCode = "409", description = "Email ou numéro de barreau déjà utilisé")
+    })
+    public ResponseEntity<Void> registerLawyer(
+            @Valid @RequestBody RegisterLawyerRequest request) {
+        authService.registerLawyer(request);
+        return ResponseEntity.status(HttpStatus.CREATED).build();
+    }
 }

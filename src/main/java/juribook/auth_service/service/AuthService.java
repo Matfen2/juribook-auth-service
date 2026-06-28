@@ -1,7 +1,9 @@
 package juribook.auth_service.service;
 
 import juribook.auth_service.dto.request.RegisterClientRequest;
+import juribook.auth_service.dto.request.RegisterLawyerRequest;
 import juribook.auth_service.dto.response.RegisterClientResponse;
+import juribook.auth_service.entity.LawyerStatus;
 import juribook.auth_service.entity.Role;
 import juribook.auth_service.entity.User;
 import juribook.auth_service.repository.UserRepository;
@@ -46,5 +48,33 @@ public class AuthService {
                 .role(saved.getRole())
                 .message("Inscription réussie")
                 .build();
+    }
+
+    // ── Inscription avocat ───────────────────────────────────
+    @Transactional
+    public void registerLawyer(RegisterLawyerRequest request) {
+
+        if (userRepository.existsByEmail(request.getEmail())) {
+            throw new IllegalArgumentException("Email déjà utilisé");
+        }
+
+        if (userRepository.existsByBarNumber(request.getBarNumber())) {
+            throw new IllegalArgumentException("Ce numéro de barreau est déjà enregistré");
+        }
+
+        User user = new User();
+        user.setName(request.getName());
+        user.setEmail(request.getEmail());
+        user.setPhone(request.getPhone());
+        user.setPassword(passwordEncoder.encode(request.getPassword()));
+        user.setRole(Role.LAWYER);
+        user.setBarNumber(request.getBarNumber());
+        user.setSpecialty(request.getSpecialty());
+        user.setCity(request.getCity());
+        user.setLawyerStatus(LawyerStatus.PENDING);
+
+        userRepository.save(user);
+        log.info("Nouvel avocat inscrit : email={}, barNumber={}, status=PENDING",
+                user.getEmail(), user.getBarNumber());
     }
 }
