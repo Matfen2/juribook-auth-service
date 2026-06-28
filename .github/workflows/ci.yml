@@ -1,7 +1,7 @@
 # ═══════════════════════════════════════════════════════════
 #  GitHub Actions CI/CD - auth-service
 #  Pipeline : build → test → docker build & push (GHCR)
-#  Déclenché sur push develop et pull request vers main
+#  Déclenché sur push features/test et pull request vers main
 # ═══════════════════════════════════════════════════════════
 
 name: CI
@@ -9,10 +9,10 @@ name: CI
 on:
   push:
     branches:
-      - develop
+      - features/test
   pull_request:
     branches:
-      - main
+      - develop
 
 jobs:
 
