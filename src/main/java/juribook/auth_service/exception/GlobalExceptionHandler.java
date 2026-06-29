@@ -11,17 +11,23 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Gestionnaire global des exceptions HTTP.
+ * Gestionnaire global des exceptions HTTP pour l'auth-service.
  *
  * Codes HTTP retournés :
- *   400 → validation des champs (@Valid)
+ *   400 → validation des champs (@Valid) ou argument invalide
+ *   404 → utilisateur introuvable (UserNotFoundException)
+ *   409 → email ou barreau déjà utilisé (IllegalArgumentException avec message "existe déjà")
  *   500 → erreur inattendue
+ *
+ * Règle de distinction 400 vs 409 :
+ *   On inspecte le message de l'exception pour déterminer le code.
+ *   Si le message contient "existe déjà" ou "déjà utilisé" → 409 Conflict
+ *   Sinon → 400 Bad Request
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    // ── 400 — Validation des champs ───────────────────────────
-    // Retourne un objet avec le nom du champ + le message d'erreur
+    // ── 400 — Validation des champs (@Valid) ─────────────────
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, Object>> handleValidation(
             MethodArgumentNotValidException ex) {
@@ -37,12 +43,34 @@ public class GlobalExceptionHandler {
                 .body(Map.of("errors", errors, "message", "Données invalides"));
     }
 
-    // ── 400 — Règle métier invalide ──────────────────────────
+    // ── 404 — Utilisateur introuvable ─────────────────────────
+    @ExceptionHandler(UserNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleUserNotFound(
+            UserNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(Map.of("message", ex.getMessage()));
+    }
+
+    // ── 400 / 409 — Règle métier ─────────────────────────────
+    // IllegalArgumentException est utilisée pour deux cas distincts :
+    //   - Email/barreau déjà utilisé → 409 Conflict
+    //   - Compte désactivé ou autre règle → 400 Bad Request
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, String>> handleIllegalArgument(
             IllegalArgumentException ex) {
-        return ResponseEntity.badRequest()
-                .body(Map.of("message", ex.getMessage()));
+
+        String message = ex.getMessage();
+
+        // Détection des cas de conflit (doublon)
+        boolean isConflict = message != null && (
+            message.contains("existe déjà") ||
+            message.contains("déjà utilisé") ||
+            message.contains("déjà enregistré")
+        );
+
+        HttpStatus status = isConflict ? HttpStatus.CONFLICT : HttpStatus.BAD_REQUEST;
+        return ResponseEntity.status(status)
+                .body(Map.of("message", message != null ? message : "Requête invalide"));
     }
 
     // ── 500 — Erreur inattendue ───────────────────────────────
