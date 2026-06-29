@@ -23,6 +23,8 @@ public class AuthService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final JwtService jwtService;
+    private final RefreshTokenService refreshTokenService;
 
     // ── Inscription client ───────────────────────────────────
     @Transactional
@@ -84,22 +86,26 @@ public class AuthService {
     // ── Login ────────────────────────────────────────────────
     @Transactional
     public LoginResponse login(LoginRequest request) {
- 
+
         User user = userRepository.findByEmail(request.getEmail().toLowerCase().trim())
                 .orElseThrow(() -> new UserNotFoundException("Email ou mot de passe incorrect"));
- 
+
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
             throw new UserNotFoundException("Email ou mot de passe incorrect");
         }
- 
+
         if (!user.isEnabled()) {
             throw new IllegalArgumentException("Ce compte est désactivé");
         }
- 
- 
+
+        String accessToken = jwtService.generateToken(user);
+        String refreshToken = refreshTokenService.createRefreshToken(user).getToken();
+
         log.info("Connexion réussie : id={}, email={}, role={}", user.getId(), user.getEmail(), user.getRole());
- 
+
         return LoginResponse.builder()
+                .token(accessToken)
+                .refreshToken(refreshToken)
                 .type("Bearer")
                 .id(user.getId())
                 .name(user.getName())
