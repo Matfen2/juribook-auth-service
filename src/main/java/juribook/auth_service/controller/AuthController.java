@@ -40,11 +40,13 @@ public class AuthController {
     })
     public ResponseEntity<RegisterClientResponse> registerClient(
             @Valid @RequestBody RegisterClientRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(authService.registerClient(request));
+        // Ligne séparée en deux statements pour la lisibilité,
+        // suite à la review d'Abdelhadi (mentor)
+        RegisterClientResponse response = authService.registerClient(request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
     // ── POST /api/auth/register/lawyer ───────────────────────
-    // registerLawyer() retourne void → ResponseEntity<Void>
     @PostMapping("/register/lawyer")
     @Operation(summary = "Inscription avocat", description = "Statut PENDING — en attente de validation admin")
     @ApiResponses({
@@ -67,7 +69,8 @@ public class AuthController {
         @ApiResponse(responseCode = "404", description = "Email ou mot de passe incorrect")
     })
     public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
-        return ResponseEntity.ok(authService.login(request));
+        LoginResponse response = authService.login(request);
+        return ResponseEntity.ok(response);
     }
 
     // ── POST /api/auth/refresh ───────────────────────────────
@@ -82,7 +85,8 @@ public class AuthController {
     })
     public ResponseEntity<RefreshTokenResponse> refresh(
             @Valid @RequestBody RefreshTokenRequest request) {
-        return ResponseEntity.ok(refreshTokenService.refresh(request));
+        RefreshTokenResponse response = refreshTokenService.refresh(request);
+        return ResponseEntity.ok(response);
     }
 
     // ── POST /api/auth/logout ────────────────────────────────
