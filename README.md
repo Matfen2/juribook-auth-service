@@ -1,13 +1,13 @@
 # juribook-auth-service
 
-Microservice d'authentification pour **JuriBook**, gestion des inscriptions, connexions, refresh tokens et protection des routes par rôle via JWT.
+Microservice d'authentification pour **JuriBook**, gestion des inscriptions, connexions, refresh tokens, protection des routes par rôle via JWT et validation admin des profils avocats.
 
 ## Stack
 
 - Java 21 · Spring Boot 4.1.0 · Maven
 - Spring Security · JWT (JJWT 0.12.6) · BCrypt
 - PostgreSQL 16 · Flyway
-- Apache Kafka (producer - topic `audit-events`)
+- Apache Kafka (producer - topic `audit-events`, désactivé en dev local)
 - Springdoc OpenAPI (Swagger UI)
 - JUnit 5 + Mockito (35 tests unitaires)
 - Port : **8081**
@@ -17,23 +17,28 @@ Microservice d'authentification pour **JuriBook**, gestion des inscriptions, con
 ```
 src/main/java/juribook/auth_service/
 ├── config/
-│   ├── SecurityConfig.java           # Règles d'accès par rôle + filtre JWT + bean PasswordEncoder
-│   ├── CorsConfig.java               # CORS pour le frontend (localhost:5173)
+│   ├── SecurityConfig.java           # Règles d'accès par rôle, CORS intégré, filtre JWT, bean PasswordEncoder
 │   └── OpenApiConfig.java            # Configuration Swagger UI
 ├── controller/
 │   ├── AuthController.java           # POST /register, /register/lawyer, /login, /refresh, /logout
-│   └── UserController.java           # GET /me, /lawyer-profile, /client-dashboard
+│   ├── UserController.java           # GET /me, /lawyer-profile, /client-dashboard
+│   └── AdminController.java          # GET/PUT /api/admin/** - validation des profils avocats
 ├── dto/
 │   ├── request/
 │   │   ├── LoginRequest.java
 │   │   ├── RegisterClientRequest.java
 │   │   ├── RegisterLawyerRequest.java
-│   │   └── RefreshTokenRequest.java
+│   │   ├── RefreshTokenRequest.java
+│   │   └── UpdateLawyerStatusRequest.java
 │   └── response/
 │       ├── LoginResponse.java
 │       ├── RegisterClientResponse.java
 │       ├── RegisterLawyerResponse.java
-│       └── RefreshTokenResponse.java
+│       ├── RefreshTokenResponse.java
+│       ├── UserMeResponse.java               # record - réponse GET /me
+│       ├── LawyerProfileMeResponse.java      # record - réponse GET /lawyer-profile
+│       ├── ClientDashboardResponse.java      # record - réponse GET /client-dashboard
+│       └── LawyerAdminResponse.java          # réponse admin (liste + détail avocat)
 ├── entity/
 │   ├── User.java                     # Entité JPA principale
 │   ├── Role.java                     # Enum : CLIENT, LAWYER, ADMIN
@@ -45,15 +50,16 @@ src/main/java/juribook/auth_service/
 ├── filter/
 │   └── JwtAuthenticationFilter.java  # Filtre Spring Security (OncePerRequestFilter)
 ├── repository/
-│   ├── UserRepository.java
+│   ├── UserRepository.java           # + findByRole, findByRoleAndLawyerStatus, countByRole(...)
 │   └── RefreshTokenRepository.java
 ├── security/
 │   └── JwtService.java               # Génération et validation des tokens JWT
 └── service/
     ├── AuthService.java              # Logique métier inscription + login
-    └── RefreshTokenService.java      # Rotation des refresh tokens
+    ├── RefreshTokenService.java      # Rotation des refresh tokens
+    └── AdminService.java             # Validation/refus des profils avocats, stats dashboard
 src/main/resources/
-├── application.yml
+├── application.yml                   # Kafka désactivé via spring.autoconfigure.exclude (dev local)
 └── db/migration/
     ├── V1__create_users_table.sql
     └── V2__create_refresh_tokens_table.sql
@@ -70,6 +76,10 @@ src/test/resources/
 └── application-test.yml              # H2 en mémoire + Flyway désactivé pour CI
 ```
 
+> **Note CORS** — Le CORS est configuré directement dans `SecurityConfig` via `.cors(cors -> cors.configurationSource(...))`, sans bean `CorsFilter` séparé. Un `CorsFilter` externe entre en conflit avec `SecurityFilterChain` dans Spring Boot 4 et empêche son chargement (symptôme : `inMemoryUserDetailsManager` au démarrage à la place des règles de `SecurityConfig`).
+
+> **Note DTOs** — Les réponses de `UserController` utilisent des `record` typés (`UserMeResponse`, `LawyerProfileMeResponse`, `ClientDashboardResponse`) plutôt que des `Map<String, Object>`, pour un contrat d'API sûr à la compilation et une documentation Swagger correcte.
+
 ## Lancer les tests
 
 ```bash
@@ -85,8 +95,11 @@ BUILD SUCCESS
 
 ```bash
 # Prérequis : PostgreSQL sur localhost:5432 avec la base authdb
-mvn spring-boot:run
+# Kafka est exclu par défaut en dev local (voir application.yml)
+mvn clean spring-boot:run
 ```
+
+> ⚠️ Toujours utiliser `mvn clean spring-boot:run` après une modification de `SecurityConfig`, `JwtAuthenticationFilter` ou tout fichier de `config/` — Maven peut réutiliser un bytecode obsolète sans `clean`, ce qui provoque silencieusement le rejet de la configuration de sécurité.
 
 ## Lancer via Docker Compose
 
@@ -124,6 +137,17 @@ docker compose up -d postgres-auth auth-service
 | `GET` | `/api/users/me` | Tous | Profil de l'utilisateur connecté |
 | `GET` | `/api/users/lawyer-profile` | `LAWYER` | Profil avocat |
 | `GET` | `/api/users/client-dashboard` | `CLIENT` | Dashboard client |
+
+### Administration (rôle ADMIN requis)
+
+| Méthode | URL | Description |
+|---|---|---|
+| `GET` | `/api/admin/lawyers` | Liste tous les avocats (tous statuts) |
+| `GET` | `/api/admin/lawyers/pending` | Liste les avocats en attente de validation |
+| `GET` | `/api/admin/lawyers/by-status?status=APPROVED` | Liste les avocats par statut |
+| `GET` | `/api/admin/lawyers/{id}` | Détail d'un profil avocat |
+| `PUT` | `/api/admin/lawyers/{id}/status` | Valider (`APPROVED`) ou refuser (`REJECTED`) un avocat |
+| `GET` | `/api/admin/stats` | Compteurs dashboard (pending, approved, rejected, clients) |
 
 ---
 
@@ -242,12 +266,6 @@ Réponse — 200 (LAWYER) :
     "lawyerStatus": "PENDING"
 }
 ```
-Réponse — 403 si CLIENT :
-```json
-{
-    "message": "Accès interdit : permissions insuffisantes"
-}
-```
 
 ### GET /api/users/client-dashboard - réservé aux clients
 ```
@@ -263,10 +281,73 @@ Réponse — 200 (CLIENT) :
     "message": "Bienvenue sur votre espace client"
 }
 ```
-Réponse — 403 si LAWYER :
+
+---
+
+### Administration - validation des profils avocats
+
+#### Lister les avocats en attente
+```
+GET http://localhost:8081/api/admin/lawyers/pending
+Authorization: Bearer <token_admin>
+```
+Réponse — 200 :
+```json
+[
+    {
+        "id": 2,
+        "name": "Maître Sophie Martin",
+        "email": "sophie.martin@avocat.fr",
+        "phone": "0698765432",
+        "role": "LAWYER",
+        "barNumber": "75001",
+        "specialty": "Droit du travail",
+        "city": "Paris",
+        "lawyerStatus": "PENDING",
+        "enabled": true,
+        "createdAt": "2026-06-29T22:46:00",
+        "updatedAt": "2026-06-29T22:46:00"
+    }
+]
+```
+
+#### Valider un avocat
+```json
+PUT http://localhost:8081/api/admin/lawyers/2/status
+Authorization: Bearer <token_admin>
+Content-Type: application/json
+
+{
+    "status": "APPROVED"
+}
+```
+Effet : `lawyerStatus` passe à `APPROVED`, `enabled` passe à `true` (déjà `true` par défaut mais réaffirmé).
+
+#### Refuser un avocat
+```json
+PUT http://localhost:8081/api/admin/lawyers/2/status
+Authorization: Bearer <token_admin>
+Content-Type: application/json
+
+{
+    "status": "REJECTED",
+    "reason": "Numéro de barreau non vérifiable"
+}
+```
+Effet : `lawyerStatus` passe à `REJECTED`, `enabled` passe à `false` — l'avocat ne peut plus se connecter.
+
+#### Stats dashboard
+```
+GET http://localhost:8081/api/admin/stats
+Authorization: Bearer <token_admin>
+```
+Réponse — 200 :
 ```json
 {
-    "message": "Accès interdit : permissions insuffisantes"
+    "pending": 2,
+    "approved": 0,
+    "rejected": 0,
+    "clients": 1
 }
 ```
 
@@ -277,12 +358,12 @@ Réponse — 403 si LAWYER :
 | Code | Cas |
 |---|---|
 | 201 | Inscription réussie |
-| 200 | Login ou consultation réussis |
+| 200 | Login, consultation ou validation admin réussis |
 | 204 | Logout réussi |
-| 400 | Données invalides (champ manquant, format incorrect, règle métier) |
+| 400 | Données invalides (champ manquant, format incorrect, statut admin invalide) |
 | 401 | Token absent ou invalide |
-| 403 | Rôle insuffisant |
-| 404 | Utilisateur introuvable (email ou mot de passe incorrect) |
+| 403 | Rôle insuffisant (ex : CLIENT sur une route ADMIN) |
+| 404 | Utilisateur introuvable (email/mot de passe incorrect, ou avocat introuvable côté admin) |
 | 409 | Email ou numéro de barreau déjà utilisé |
 | 500 | Erreur inattendue |
 
@@ -294,6 +375,23 @@ Réponse — 403 si LAWYER :
 
 ```bash
 docker exec -it juribook-postgres-auth psql -U juribook -d authdb
+```
+
+> ⚠️ Pour insérer un hash BCrypt en une commande `-c` depuis PowerShell, le `$` peut être interprété comme une variable shell et tronquer le hash. Préférer le mode interactif (`docker exec -it ... psql -U juribook -d authdb` puis coller la requête directement dans le prompt `authdb=#`).
+
+### Créer un compte ADMIN (mot de passe : `motdepasse123`)
+
+```sql
+INSERT INTO users (name, email, password, role, enabled, created_at, updated_at)
+VALUES (
+  'Admin JuriBook',
+  'admin@juribook.fr',
+  '$2b$10$K6Fs7CHCaGkVMfdkU4k/wuE/NyCAD4wbNBEshiBIU5CuSIkOxOGqu',
+  'ADMIN',
+  true,
+  NOW(),
+  NOW()
+);
 ```
 
 ### Lister tous les utilisateurs
@@ -372,11 +470,11 @@ docker exec -it juribook-postgres-auth psql -U juribook -d authdb -c "SELECT ver
 | `LAWYER` | Avocat inscrit (validé par admin) | Gestion profil, disponibilités, rendez-vous |
 | `ADMIN` | Administrateur plateforme | Tout + validation avocats + audit |
 
-> ⚠️ Un avocat nouvellement inscrit a le statut `PENDING` — il ne peut pas accéder aux routes `LAWYER` tant que l'admin ne l'a pas validé (`APPROVED`).
+> ⚠️ Un avocat nouvellement inscrit a le statut `PENDING`, il ne peut pas accéder aux routes `LAWYER` tant que l'admin ne l'a pas validé (`APPROVED`). Un avocat `REJECTED` a `enabled = false` et ne peut plus se connecter du tout.
 
 ---
 
-## Refresh token — fonctionnement
+## Refresh token - fonctionnement
 
 ```
 Login           → JWT (24h) + refresh token (7 jours)
