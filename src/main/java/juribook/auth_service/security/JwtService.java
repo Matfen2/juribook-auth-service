@@ -1,4 +1,4 @@
-package juribook.auth_service.service;
+package juribook.auth_service.security;
 
 import juribook.auth_service.entity.User;
 import io.jsonwebtoken.Claims;

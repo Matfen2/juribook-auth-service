@@ -8,7 +8,7 @@ import juribook.auth_service.dto.response.RegisterClientResponse;
 import juribook.auth_service.entity.Role;
 import juribook.auth_service.exception.UserNotFoundException;
 import juribook.auth_service.repository.UserRepository;
-import juribook.auth_service.service.JwtService;
+import juribook.auth_service.security.JwtService;
 import juribook.auth_service.service.AuthService;
 import juribook.auth_service.service.RefreshTokenService;
 import org.junit.jupiter.api.BeforeEach;

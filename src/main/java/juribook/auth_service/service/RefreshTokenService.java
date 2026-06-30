@@ -5,6 +5,7 @@ import juribook.auth_service.dto.response.RefreshTokenResponse;
 import juribook.auth_service.entity.RefreshToken;
 import juribook.auth_service.entity.User;
 import juribook.auth_service.repository.RefreshTokenRepository;
+import juribook.auth_service.security.JwtService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

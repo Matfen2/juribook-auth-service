@@ -11,6 +11,8 @@ import juribook.auth_service.entity.Role;
 import juribook.auth_service.entity.User;
 import juribook.auth_service.exception.UserNotFoundException;
 import juribook.auth_service.repository.UserRepository;
+import juribook.auth_service.security.JwtService;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;

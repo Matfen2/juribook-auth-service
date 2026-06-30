@@ -21,6 +21,7 @@ spring:
     hibernate:
       ddl-auto: validate
     show-sql: false
+    open-in-view: false
 
   # ═══════════════════════════════════════════════════════════
   #  Flyway
@@ -29,14 +30,20 @@ spring:
     enabled: true
 
   # ═══════════════════════════════════════════════════════════
-  #  Kafka
-  #  En conteneur, surchargé par SPRING_KAFKA_BOOTSTRAP_SERVERS
+  #  Kafka — désactivé en dev local (pas de broker disponible)
+  #  En production Docker, réactiver en supprimant l'exclude
+  #  et en passant SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092
   # ═══════════════════════════════════════════════════════════
   kafka:
     bootstrap-servers: localhost:9092
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
+
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration
+      - org.springframework.boot.kafka.autoconfigure.KafkaAutoConfiguration
 
 server:
   port: 8081
@@ -55,10 +62,10 @@ jwt:
 # ═══════════════════════════════════════════════════════════
 springdoc:
   api-docs:
-    path: /v3/api-docs        # endpoint JSON de la spec OpenAPI
+    path: /v3/api-docs
   swagger-ui:
-    path: /swagger-ui.html    # URL d'accès à l'interface Swagger
-    tags-sorter: alpha         # trie les tags alphabétiquement
-    operations-sorter: alpha   # trie les opérations alphabétiquement
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
     display-request-duration: true
-  show-actuator: false         # ne pas exposer les endpoints Actuator dans Swagger
+  show-actuator: false

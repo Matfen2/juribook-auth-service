@@ -2,7 +2,7 @@ package juribook.auth_service.filter;
 
 import juribook.auth_service.entity.User;
 import juribook.auth_service.repository.UserRepository;
-import juribook.auth_service.service.JwtService;
+import juribook.auth_service.security.JwtService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;

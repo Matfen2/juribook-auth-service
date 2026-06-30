@@ -2,7 +2,6 @@ package juribook.auth_service.security;
 
 import juribook.auth_service.entity.Role;
 import juribook.auth_service.entity.User;
-import juribook.auth_service.service.JwtService;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;

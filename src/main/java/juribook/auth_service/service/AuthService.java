@@ -10,6 +10,7 @@ import juribook.auth_service.entity.Role;
 import juribook.auth_service.entity.User;
 import juribook.auth_service.exception.UserNotFoundException;
 import juribook.auth_service.repository.UserRepository;
+import juribook.auth_service.security.JwtService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;

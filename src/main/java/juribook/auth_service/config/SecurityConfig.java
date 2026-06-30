@@ -14,22 +14,12 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
-/**
- * Configuration Spring Security de l'auth-service.
- *
- * Déclare deux beans essentiels :
- *   - PasswordEncoder (BCrypt) → injecté dans AuthService pour hasher les mots de passe
- *   - SecurityFilterChain     → règles d'accès + filtre JWT
- *
- * Routes publiques :
- *   POST /api/auth/register, /register/lawyer, /login, /refresh
- *   GET  /actuator/health, /swagger-ui/**, /v3/api-docs/**
- *
- * Routes protégées :
- *   POST /api/auth/logout → JWT requis
- *   GET  /api/users/**   → JWT requis + rôle
- */
+import java.util.List;
+
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity
@@ -49,11 +39,6 @@ public class SecurityConfig {
         "/v3/api-docs/**"
     };
 
-    /**
-     * Bean PasswordEncoder - BCrypt avec force 10 (défaut).
-     * Injecté dans AuthService via @RequiredArgsConstructor.
-     * ⚠️ Doit être dans un @Configuration pour être visible par Spring.
-     */
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
@@ -62,6 +47,7 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         return http
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session ->
                     session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
@@ -71,10 +57,24 @@ public class SecurityConfig {
                     .requestMatchers(HttpMethod.GET, "/api/users/me").authenticated()
                     .requestMatchers(HttpMethod.GET, "/api/users/lawyer-profile").hasRole("LAWYER")
                     .requestMatchers(HttpMethod.GET, "/api/users/client-dashboard").hasRole("CLIENT")
+                    .requestMatchers("/api/admin/**").hasRole("ADMIN")
                     .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthenticationFilter,
                     UsernamePasswordAuthenticationFilter.class)
                 .build();
+    }
+
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration config = new CorsConfiguration();
+        config.setAllowedOrigins(List.of("http://localhost:5173"));
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
+        config.setExposedHeaders(List.of("Authorization"));
+        config.setAllowCredentials(true);
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", config);
+        return source;
     }
 }
