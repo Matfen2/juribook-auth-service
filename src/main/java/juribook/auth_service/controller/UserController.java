@@ -2,8 +2,11 @@ package juribook.auth_service.controller;
 
 import juribook.auth_service.dto.response.ClientDashboardResponse;
 import juribook.auth_service.dto.response.LawyerProfileMeResponse;
+import juribook.auth_service.dto.response.UserContactResponse;
 import juribook.auth_service.dto.response.UserMeResponse;
 import juribook.auth_service.entity.User;
+import juribook.auth_service.exception.UserNotFoundException;
+import juribook.auth_service.repository.UserRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -28,6 +31,8 @@ import org.springframework.web.bind.annotation.*;
 @Tag(name = "Utilisateurs", description = "Accès aux informations de l'utilisateur connecté")
 @SecurityRequirement(name = "bearerAuth")
 public class UserController {
+
+    private final UserRepository userRepository;
 
     // ── GET /api/users/me ────────────────────────────────────
     @GetMapping("/me")
@@ -70,5 +75,22 @@ public class UserController {
             "Bienvenue sur votre espace client"
         );
         return ResponseEntity.ok(response);
+    }
+
+    // ── GET /api/users/{id}/contact ──────────────────────────
+    // Sprint 5.3 : endpoint PUBLIC (pas de token requis), consommé par
+    // les autres microservices pour résoudre nom/email à partir d'un id
+    // (ex: notification-service, pour l'email de confirmation client).
+    // Volontairement minimal : pas de rôle, pas de statut avocat, pas de
+    // mot de passe — juste ce qui est nécessaire à un email.
+    @GetMapping("/{id}/contact")
+    @Operation(
+        summary = "Contact minimal d'un utilisateur (nom + email)",
+        description = "Public — utilisé en interne par les autres microservices pour l'envoi d'emails."
+    )
+    public ResponseEntity<UserContactResponse> getContact(@PathVariable Long id) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new UserNotFoundException("Utilisateur introuvable : id=" + id));
+        return ResponseEntity.ok(new UserContactResponse(user.getId(), user.getName(), user.getEmail()));
     }
 }
