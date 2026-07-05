@@ -1,0 +1,12 @@
+juribook\auth_service\service\AuthServiceTest$RegisterClientTests.class
+juribook\auth_service\service\AuthServiceTest$LoginTests.class
+juribook\auth_service\service\AuthServiceTest$RegisterLawyerTests.class
+juribook\auth_service\controller\AuthControllerTest$LogoutEndpointTests.class
+juribook\auth_service\service\AuthServiceTest.class
+juribook\auth_service\controller\AuthControllerTest$LoginEndpointTests.class
+juribook\auth_service\security\JwtServiceTest.class
+juribook\auth_service\service\RefreshTokenServiceTest$RefreshTests.class
+juribook\auth_service\controller\AuthControllerTest$RegisterClientEndpointTests.class
+juribook\auth_service\controller\AuthControllerTest.class
+juribook\auth_service\AuthServiceApplicationTests.class
+juribook\auth_service\service\RefreshTokenServiceTest.class
