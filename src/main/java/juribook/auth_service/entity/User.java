@@ -65,4 +65,10 @@ public class User {
     protected void onUpdate() {
         this.updatedAt = LocalDateTime.now();
     }
+
+    @Column(name = "suspended_reason", length = 200)
+    private String suspendedReason;
+ 
+    @Column(name = "suspended_at")
+    private LocalDateTime suspendedAt;
 }
