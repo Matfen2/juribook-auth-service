@@ -10,16 +10,15 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 
 /**
- * Suspension de compte suite à une détection d'abus (Sprint 6.10).
+ * Suspension / réactivation de compte (Sprint 6.10 + 7.2).
  *
  * Réutilise le champ `enabled` déjà existant sur User (déjà vérifié
  * dans AuthService.login — "Ce compte est désactivé") plutôt que
  * d'introduire un nouveau booléen `suspended` redondant. Seuls
  * `suspendedReason`/`suspendedAt` sont de nouvelles colonnes, pour
- * garder une trace de POURQUOI le compte a été désactivé (utile pour
- * un futur écran admin de consultation) — `enabled=false` reste la
- * seule donnée réellement vérifiée au login, ces deux colonnes ne sont
- * que des métadonnées d'audit.
+ * garder une trace de POURQUOI le compte a été désactivé — `enabled`
+ * reste la seule donnée réellement vérifiée au login, ces deux
+ * colonnes ne sont que des métadonnées d'audit.
  *
  * ⚠️ N'invalide PAS un JWT déjà émis — cf. limite déjà documentée :
  * un token émis avant la désactivation reste valide jusqu'à son
@@ -27,10 +26,12 @@ import java.time.LocalDateTime;
  * entre les 6 services. Le blocage n'est effectif qu'à la PROCHAINE
  * tentative de connexion.
  *
- * ⚠️ suspendAccount reste générique par rôle (suspend n'importe quel
- * compte par son id), même si dans la pratique actuelle actorId dans
- * abuse.detected est toujours un clientId (les deux signaux d'abus du
- * Sprint 6.9 proviennent tous deux de clientId).
+ * ⚠️ suspendAccount/reactivateAccount échouent silencieusement
+ * (log.warn, pas d'exception) si l'utilisateur n'existe pas — comportement
+ * voulu pour l'usage Kafka (consumer abuse.detected, Sprint 6.10) qui ne
+ * doit jamais planter sur un actorId invalide. L'usage admin (Sprint 7.2,
+ * via AdminUserService) fait sa propre vérification d'existence en amont
+ * pour renvoyer un 404 explicite plutôt que de compter sur ce no-op silencieux.
  */
 @Service
 @RequiredArgsConstructor
@@ -58,7 +59,40 @@ public class UserSuspensionService {
         user.setSuspendedAt(LocalDateTime.now());
         userRepository.save(user);
 
-        log.warn("Compte désactivé suite à détection d'abus : id={}, email={}, reason={}",
+        log.warn("Compte désactivé : id={}, email={}, reason={}",
                 user.getId(), user.getEmail(), reason);
+    }
+
+    /**
+     * Réactive un compte désactivé. Efface suspendedReason/
+     * suspendedAt plutôt que de les laisser trainer, sinon un compte
+     * réactivé garderait indéfiniment le motif de sa dernière suspension,
+     * trompeur dans un futur écran admin de consultation.
+     *
+     * Ne restaure PAS lawyerStatus si le compte est un LAWYER — un avocat
+     * désactivé puis réactivé reprend directement son statut de validation
+     * d'avant (pas de perte de validation), ce champ n'est de toute façon
+     * jamais touché par suspendAccount, donc rien à restaurer ici.
+     */
+    @Transactional
+    public void reactivateAccount(Long userId) {
+        User user = userRepository.findById(userId).orElse(null);
+
+        if (user == null) {
+            log.warn("Réactivation impossible — utilisateur introuvable : id={}", userId);
+            return;
+        }
+
+        if (user.isEnabled()) {
+            log.debug("Compte déjà actif, aucune action supplémentaire : id={}", userId);
+            return;
+        }
+
+        user.setEnabled(true);
+        user.setSuspendedReason(null);
+        user.setSuspendedAt(null);
+        userRepository.save(user);
+
+        log.info("Compte réactivé : id={}, email={}", user.getId(), user.getEmail());
     }
 }

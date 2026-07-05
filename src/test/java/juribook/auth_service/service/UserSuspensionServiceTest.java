@@ -5,6 +5,7 @@ import juribook.auth_service.entity.User;
 import juribook.auth_service.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -12,6 +13,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -21,6 +23,7 @@ import static org.mockito.Mockito.*;
 /**
  * Tests d'UserSuspensionService : réutilise le champ
  * `enabled` déjà existant sur User, pas un nouveau flag `suspended`.
+ * Ajout de reactivateAccount, symétrique de suspendAccount.
  */
 @ExtendWith(MockitoExtension.class)
 class UserSuspensionServiceTest {
@@ -45,41 +48,118 @@ class UserSuspensionServiceTest {
         activeUser.setEnabled(true);
     }
 
-    @Test
-    @DisplayName("cas nominal - désactive le compte et trace le motif/la date")
-    void suspendAccount_activeAccount_disablesAndRecordsMetadata() {
-        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(activeUser));
-        when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+    @Nested
+    @DisplayName("suspendAccount")
+    class SuspendAccount {
 
-        userSuspensionService.suspendAccount(USER_ID, REASON);
+        @Test
+        @DisplayName("cas nominal - désactive le compte et trace le motif/la date")
+        void suspendAccount_activeAccount_disablesAndRecordsMetadata() {
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.of(activeUser));
+            when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
-        verify(userRepository).save(captor.capture());
+            userSuspensionService.suspendAccount(USER_ID, REASON);
 
-        User saved = captor.getValue();
-        assertThat(saved.isEnabled()).isFalse();
-        assertThat(saved.getSuspendedReason()).isEqualTo(REASON);
-        assertThat(saved.getSuspendedAt()).isNotNull();
+            ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+            verify(userRepository).save(captor.capture());
+
+            User saved = captor.getValue();
+            assertThat(saved.isEnabled()).isFalse();
+            assertThat(saved.getSuspendedReason()).isEqualTo(REASON);
+            assertThat(saved.getSuspendedAt()).isNotNull();
+        }
+
+        @Test
+        @DisplayName("compte déjà désactivé - idempotent, ne re-sauvegarde pas")
+        void suspendAccount_alreadyDisabled_doesNothing() {
+            activeUser.setEnabled(false);
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.of(activeUser));
+
+            userSuspensionService.suspendAccount(USER_ID, REASON);
+
+            verify(userRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("utilisateur introuvable - ne plante pas, log seulement")
+        void suspendAccount_userNotFound_doesNotThrow() {
+            when(userRepository.findById(999L)).thenReturn(Optional.empty());
+
+            userSuspensionService.suspendAccount(999L, REASON);
+
+            verify(userRepository, never()).save(any());
+        }
     }
 
-    @Test
-    @DisplayName("compte déjà désactivé - idempotent, ne re-sauvegarde pas")
-    void suspendAccount_alreadyDisabled_doesNothing() {
-        activeUser.setEnabled(false);
-        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(activeUser));
+    @Nested
+    @DisplayName("reactivateAccount")
+    class ReactivateAccount {
 
-        userSuspensionService.suspendAccount(USER_ID, REASON);
+        private User disabledUser;
 
-        verify(userRepository, never()).save(any());
-    }
+        @BeforeEach
+        void setUp() {
+            disabledUser = new User();
+            disabledUser.setId(USER_ID);
+            disabledUser.setEmail("jean.dupont@example.com");
+            disabledUser.setRole(Role.CLIENT);
+            disabledUser.setEnabled(false);
+            disabledUser.setSuspendedReason(REASON);
+            disabledUser.setSuspendedAt(LocalDateTime.now().minusDays(2));
+        }
 
-    @Test
-    @DisplayName("utilisateur introuvable - ne plante pas, log seulement")
-    void suspendAccount_userNotFound_doesNotThrow() {
-        when(userRepository.findById(999L)).thenReturn(Optional.empty());
+        @Test
+        @DisplayName("cas nominal - réactive le compte et efface le motif/la date de suspension")
+        void reactivateAccount_disabledAccount_enablesAndClearsSuspensionMetadata() {
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.of(disabledUser));
+            when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        userSuspensionService.suspendAccount(999L, REASON);
+            userSuspensionService.reactivateAccount(USER_ID);
 
-        verify(userRepository, never()).save(any());
+            ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+            verify(userRepository).save(captor.capture());
+
+            User saved = captor.getValue();
+            assertThat(saved.isEnabled()).isTrue();
+            assertThat(saved.getSuspendedReason()).isNull();
+            assertThat(saved.getSuspendedAt()).isNull();
+        }
+
+        @Test
+        @DisplayName("compte déjà actif - idempotent, ne re-sauvegarde pas")
+        void reactivateAccount_alreadyEnabled_doesNothing() {
+            disabledUser.setEnabled(true);
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.of(disabledUser));
+
+            userSuspensionService.reactivateAccount(USER_ID);
+
+            verify(userRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("utilisateur introuvable - ne plante pas, log seulement")
+        void reactivateAccount_userNotFound_doesNotThrow() {
+            when(userRepository.findById(999L)).thenReturn(Optional.empty());
+
+            userSuspensionService.reactivateAccount(999L);
+
+            verify(userRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("ne touche pas lawyerStatus - un avocat réactivé garde son statut de validation d'avant")
+        void reactivateAccount_lawyer_doesNotResetLawyerStatus() {
+            disabledUser.setRole(Role.LAWYER);
+            disabledUser.setLawyerStatus(juribook.auth_service.entity.LawyerStatus.APPROVED);
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.of(disabledUser));
+            when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            userSuspensionService.reactivateAccount(USER_ID);
+
+            ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+            verify(userRepository).save(captor.capture());
+            assertThat(captor.getValue().getLawyerStatus())
+                    .isEqualTo(juribook.auth_service.entity.LawyerStatus.APPROVED);
+        }
     }
 }
