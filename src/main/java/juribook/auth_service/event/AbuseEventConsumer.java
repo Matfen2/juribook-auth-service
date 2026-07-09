@@ -2,6 +2,7 @@ package juribook.auth_service.event;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import juribook.auth_service.entity.SuspensionSource;
 import juribook.auth_service.service.UserSuspensionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -9,7 +10,7 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
 /**
- * Réaction automatique à abuse.detected (Sprint 6.10) — premier
+ * Réaction automatique à abuse.detected : premier
  * consumer Kafka d'auth-service, qui n'a jamais rien consommé ni
  * publié jusqu'ici.
  */
@@ -35,6 +36,6 @@ public class AbuseEventConsumer {
             return;
         }
 
-        userSuspensionService.suspendAccount(event.actorId(), event.reason());
+        userSuspensionService.suspendAccount(event.actorId(), event.reason(), SuspensionSource.ABUSE_DETECTION);
     }
 }

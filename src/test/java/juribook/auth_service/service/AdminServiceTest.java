@@ -4,6 +4,7 @@ import juribook.auth_service.dto.request.UpdateLawyerStatusRequest;
 import juribook.auth_service.dto.response.LawyerAdminResponse;
 import juribook.auth_service.entity.LawyerStatus;
 import juribook.auth_service.entity.Role;
+import juribook.auth_service.entity.SuspensionSource;
 import juribook.auth_service.entity.User;
 import juribook.auth_service.event.LawyerEventPublisher;
 import juribook.auth_service.exception.UserNotFoundException;
@@ -36,6 +37,9 @@ import static org.mockito.Mockito.*;
  *   - LawyerAdminResponse est un record (cf. commentaire explicite dans
  *     UserController.java : "Les réponses utilisent des DTOs records")
  * Adapte les noms d'accesseur si ça ne correspond pas exactement.
+ *
+ * Sprint 7.8 : suspendAccount a un 3e paramètre SuspensionSource —
+ * REJECTED doit toujours le tagger LAWYER_REJECTION.
  */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("AdminService")
@@ -108,14 +112,14 @@ class AdminServiceTest {
     class Reject {
 
         @Test
-        @DisplayName("cas nominal - passe REJECTED, délègue à suspendAccount avec le motif fourni, publie lawyer.rejected")
+        @DisplayName("cas nominal - passe REJECTED, délègue à suspendAccount avec le motif fourni et SuspensionSource.LAWYER_REJECTION, publie lawyer.rejected")
         void updateLawyerStatus_rejected_suspendsWithGivenReasonAndPublishes() {
             when(userRepository.findById(LAWYER_ID)).thenReturn(Optional.of(pendingLawyer));
 
             adminService.updateLawyerStatus(LAWYER_ID, buildRequest(LawyerStatus.REJECTED, "Pièces manquantes"));
 
             assertThat(pendingLawyer.getLawyerStatus()).isEqualTo(LawyerStatus.REJECTED);
-            verify(userSuspensionService).suspendAccount(LAWYER_ID, "Pièces manquantes");
+            verify(userSuspensionService).suspendAccount(LAWYER_ID, "Pièces manquantes", SuspensionSource.LAWYER_REJECTION);
 
             ArgumentCaptor<String> reasonCaptor = ArgumentCaptor.forClass(String.class);
             verify(lawyerEventPublisher).publishLawyerRejected(eq(pendingLawyer), reasonCaptor.capture());
@@ -123,13 +127,14 @@ class AdminServiceTest {
         }
 
         @Test
-        @DisplayName("motif absent - applique le motif par défaut avant délégation")
+        @DisplayName("motif absent - applique le motif par défaut avant délégation, toujours LAWYER_REJECTION")
         void updateLawyerStatus_rejectedNullReason_appliesDefaultReason() {
             when(userRepository.findById(LAWYER_ID)).thenReturn(Optional.of(pendingLawyer));
 
             adminService.updateLawyerStatus(LAWYER_ID, buildRequest(LawyerStatus.REJECTED, null));
 
-            verify(userSuspensionService).suspendAccount(LAWYER_ID, "Profil avocat refusé par l'administrateur");
+            verify(userSuspensionService).suspendAccount(
+                    LAWYER_ID, "Profil avocat refusé par l'administrateur", SuspensionSource.LAWYER_REJECTION);
             verify(lawyerEventPublisher).publishLawyerRejected(pendingLawyer, "Profil avocat refusé par l'administrateur");
         }
 
@@ -140,7 +145,8 @@ class AdminServiceTest {
 
             adminService.updateLawyerStatus(LAWYER_ID, buildRequest(LawyerStatus.REJECTED, "   "));
 
-            verify(userSuspensionService).suspendAccount(LAWYER_ID, "Profil avocat refusé par l'administrateur");
+            verify(userSuspensionService).suspendAccount(
+                    LAWYER_ID, "Profil avocat refusé par l'administrateur", SuspensionSource.LAWYER_REJECTION);
         }
 
         @Test

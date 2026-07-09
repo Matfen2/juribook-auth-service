@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import juribook.auth_service.dto.request.DeactivateUserRequest;
 import juribook.auth_service.dto.response.AdminUserResponse;
 import juribook.auth_service.entity.Role;
+import juribook.auth_service.entity.SuspensionSource;
 import juribook.auth_service.service.AdminUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -25,15 +26,24 @@ public class AdminUserController {
 
     @GetMapping
     @Operation(summary = "Rechercher les utilisateurs",
-        description = "Filtres cumulables optionnels : role, enabled, city. Réservé aux ADMIN.")
+        description = """
+            Filtres cumulables optionnels : role, enabled, city,
+            suspensionSource. Réservé aux ADMIN.
+
+            suspensionSource=ABUSE_DETECTION combiné à
+            enabled=false retourne les comptes suspendus automatiquement
+            par détection d'abus (par opposition à une désactivation
+            manuelle ou un refus de profil avocat).
+            """)
     public ResponseEntity<Page<AdminUserResponse>> search(
             @Parameter(description = "CLIENT, LAWYER ou ADMIN") @RequestParam(required = false) Role role,
             @Parameter(description = "true = actif, false = désactivé/suspendu") @RequestParam(required = false) Boolean enabled,
             @Parameter(description = "Ville d'exercice (avocats uniquement)") @RequestParam(required = false) String city,
+            @Parameter(description = "MANUAL, ABUSE_DETECTION ou LAWYER_REJECTION") @RequestParam(required = false) SuspensionSource suspensionSource,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
-        return ResponseEntity.ok(adminUserService.searchUsers(role, enabled, city, page, size));
+        return ResponseEntity.ok(adminUserService.searchUsers(role, enabled, city, suspensionSource, page, size));
     }
 
     // ── Activer / désactiver un compte ──────────
@@ -42,10 +52,10 @@ public class AdminUserController {
         summary = "Désactiver un compte",
         description = """
             Le compte désactivé ne peut plus se connecter (vérifié dans
-            AuthService.login). N'invalide pas un JWT déjà émis — reste
+            AuthService.login). N'invalide pas un JWT déjà émis, reste
             valide jusqu'à expiration naturelle. Motif optionnel dans le
             corps de la requête ; par défaut : "Désactivé manuellement
-            par un administrateur".
+            par un administrateur". Tracé avec suspensionSource=MANUAL.
             """
     )
     public ResponseEntity<AdminUserResponse> deactivate(
@@ -59,7 +69,7 @@ public class AdminUserController {
     @PatchMapping("/{id}/activate")
     @Operation(
         summary = "Réactiver un compte",
-        description = "Efface le motif/date de suspension. Un avocat réactivé reprend directement son lawyerStatus d'avant, pas de re-validation forcée."
+        description = "Efface le motif/date/origine de suspension. Un avocat réactivé reprend directement son lawyerStatus d'avant, pas de re-validation forcée."
     )
     public ResponseEntity<AdminUserResponse> activate(@PathVariable Long id) {
         return ResponseEntity.ok(adminUserService.activateUser(id));

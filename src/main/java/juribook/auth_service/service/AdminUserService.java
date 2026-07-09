@@ -2,6 +2,7 @@ package juribook.auth_service.service;
 
 import juribook.auth_service.dto.response.AdminUserResponse;
 import juribook.auth_service.entity.Role;
+import juribook.auth_service.entity.SuspensionSource;
 import juribook.auth_service.entity.User;
 import juribook.auth_service.exception.UserNotFoundException;
 import juribook.auth_service.repository.UserRepository;
@@ -14,8 +15,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Recherche et actions admin sur les utilisateurs.
- * Aucun appel inter-services : role/enabled/city sont tous des champs
- * locaux de User (city est dénormalisé côté avocat, cf. User.java).
+ * Aucun appel inter-services : role/enabled/city/suspensionSource sont
+ * tous des champs locaux de User.
  */
 @Service
 @RequiredArgsConstructor
@@ -27,10 +28,17 @@ public class AdminUserService {
     private final UserRepository userRepository;
     private final UserSuspensionService userSuspensionService;
 
+    /**
+     * suspensionSource ajouté aux filtres cumulables, la
+     * page "Alertes d'abus" (frontend) appelle ce même endpoint avec
+     * enabled=false&suspensionSource=ABUSE_DETECTION plutôt que
+     * d'avoir un endpoint dédié.
+     */
     @Transactional(readOnly = true)
-    public Page<AdminUserResponse> searchUsers(Role role, Boolean enabled, String city, int page, int size) {
+    public Page<AdminUserResponse> searchUsers(Role role, Boolean enabled, String city,
+                                                SuspensionSource suspensionSource, int page, int size) {
         Pageable pageable = PageRequest.of(page, Math.min(size, MAX_PAGE_SIZE));
-        return userRepository.search(role, enabled, city, pageable)
+        return userRepository.search(role, enabled, city, suspensionSource, pageable)
                 .map(AdminUserResponse::from);
     }
 
@@ -53,7 +61,7 @@ public class AdminUserService {
                 .orElseThrow(() -> new UserNotFoundException("Utilisateur introuvable : id=" + userId));
 
         String effectiveReason = (reason != null && !reason.isBlank()) ? reason : DEFAULT_DEACTIVATION_REASON;
-        userSuspensionService.suspendAccount(userId, effectiveReason);
+        userSuspensionService.suspendAccount(userId, effectiveReason, SuspensionSource.MANUAL);
 
         return AdminUserResponse.from(user);
     }

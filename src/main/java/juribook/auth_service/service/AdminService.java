@@ -4,6 +4,7 @@ import juribook.auth_service.dto.request.UpdateLawyerStatusRequest;
 import juribook.auth_service.dto.response.LawyerAdminResponse;
 import juribook.auth_service.entity.LawyerStatus;
 import juribook.auth_service.entity.Role;
+import juribook.auth_service.entity.SuspensionSource;
 import juribook.auth_service.entity.User;
 import juribook.auth_service.event.LawyerEventPublisher;
 import juribook.auth_service.exception.UserNotFoundException;
@@ -16,7 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 
 /**
- * Service admin pour la validation des profils avocats (Sprint 2.6 + 7.3).
+ * Service admin pour la validation des profils avocats.
  *
  * Règles métier :
  *   - Seul un ADMIN peut appeler ces méthodes (contrôlé dans SecurityConfig)
@@ -24,19 +25,23 @@ import java.util.List;
  *   - Un avocat REJECTED voit son compte désactivé (enabled = false)
  *   - Seuls les avocats avec statut PENDING sont dans la file d'attente
  *
- * Sprint 7.3 : REJECTED passe désormais par UserSuspensionService.
+ * REJECTED passe désormais par UserSuspensionService.
  * suspendAccount (motif + date tracés) plutôt que de faire enabled=false
- * directement — cohérent avec la désactivation manuelle (7.2) et la
- * suspension automatique pour abus (6.10), qui tracent toutes deux
+ * directement, cohérent avec la désactivation manuelle et la
+ * suspension automatique pour abus, qui tracent toutes deux
  * suspendedReason/suspendedAt. APPROVED passe symétriquement par
  * reactivateAccount, pour effacer cette trace si un avocat précédemment
  * refusé est finalement validé (changement d'avis de l'admin).
  *
+ * suspendAccount taggé SuspensionSource.LAWYER_REJECTION,
+ * pour que la page "Alertes d'abus" (filtrée sur ABUSE_DETECTION) ne
+ * remonte jamais un avocat refusé par erreur.
+ *
  * suspendAccount/reactivateAccount modifient la MÊME instance User déjà
- * chargée ici (cache de premier niveau Hibernate, même transaction) —
+ * chargée ici (cache de premier niveau Hibernate, même transaction),
  * lawyerStatus posé avant l'appel est donc bien persisté au commit même
  * si l'appel délégué fait un no-op (déjà enabled=false par ex.), grâce
- * au dirty checking JPA — pas besoin d'un save() supplémentaire explicite.
+ * au dirty checking JPA, pas besoin d'un save() supplémentaire explicite.
  */
 @Service
 @RequiredArgsConstructor
@@ -95,7 +100,7 @@ public class AdminService {
             user.setLawyerStatus(LawyerStatus.REJECTED);
             String reason = (request.getReason() != null && !request.getReason().isBlank())
                     ? request.getReason() : DEFAULT_REJECTION_REASON;
-            userSuspensionService.suspendAccount(user.getId(), reason);
+            userSuspensionService.suspendAccount(user.getId(), reason, SuspensionSource.LAWYER_REJECTION);
             log.info("Avocat refusé : id={}, email={}, raison={}", user.getId(), user.getEmail(), reason);
             lawyerEventPublisher.publishLawyerRejected(user, reason);
 

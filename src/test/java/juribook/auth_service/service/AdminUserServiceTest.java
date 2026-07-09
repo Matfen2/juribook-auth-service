@@ -3,6 +3,7 @@ package juribook.auth_service.service;
 import juribook.auth_service.dto.response.AdminUserResponse;
 import juribook.auth_service.entity.LawyerStatus;
 import juribook.auth_service.entity.Role;
+import juribook.auth_service.entity.SuspensionSource;
 import juribook.auth_service.entity.User;
 import juribook.auth_service.exception.UserNotFoundException;
 import juribook.auth_service.repository.UserRepository;
@@ -37,6 +38,11 @@ import static org.mockito.Mockito.when;
  * des champs locaux de User (cf. commentaire dans User.java : city est
  * dénormalisé côté avocat). Ce service se contente de déléguer au
  * repository et de mapper vers AdminUserResponse.
+ *
+ * Sprint 7.8 : searchUsers/UserRepository.search ont un paramètre
+ * suspensionSource supplémentaire, et deactivateUser tague désormais
+ * suspendAccount avec SuspensionSource.MANUAL — ajoutés ici sans
+ * changer la logique de test existante.
  */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("AdminUserService")
@@ -90,10 +96,10 @@ class AdminUserServiceTest {
             User lawyer = buildLawyer(10L, "Paris", true);
             Page<User> page = new PageImpl<>(List.of(lawyer));
 
-            when(userRepository.search(eq(Role.LAWYER), eq(true), eq("Paris"), any(Pageable.class)))
+            when(userRepository.search(eq(Role.LAWYER), eq(true), eq("Paris"), any(), any(Pageable.class)))
                     .thenReturn(page);
 
-            Page<AdminUserResponse> result = adminUserService.searchUsers(Role.LAWYER, true, "Paris", 0, 20);
+            Page<AdminUserResponse> result = adminUserService.searchUsers(Role.LAWYER, true, "Paris", null, 0, 20);
 
             assertThat(result.getContent()).hasSize(1);
             AdminUserResponse response = result.getContent().get(0);
@@ -104,17 +110,17 @@ class AdminUserServiceTest {
             assertThat(response.barNumber()).isEqualTo("750010");
             assertThat(response.lawyerStatus()).isEqualTo(LawyerStatus.APPROVED);
 
-            verify(userRepository).search(eq(Role.LAWYER), eq(true), eq("Paris"), any(Pageable.class));
+            verify(userRepository).search(eq(Role.LAWYER), eq(true), eq("Paris"), any(), any(Pageable.class));
         }
 
         @Test
         @DisplayName("mappe correctement un CLIENT (champs avocat null)")
         void searchUsers_mapsClientWithNullLawyerFields() {
             User client = buildClient(42L, true);
-            when(userRepository.search(eq(Role.CLIENT), any(), any(), any(Pageable.class)))
+            when(userRepository.search(eq(Role.CLIENT), any(), any(), any(), any(Pageable.class)))
                     .thenReturn(new PageImpl<>(List.of(client)));
 
-            Page<AdminUserResponse> result = adminUserService.searchUsers(Role.CLIENT, null, null, 0, 20);
+            Page<AdminUserResponse> result = adminUserService.searchUsers(Role.CLIENT, null, null, null, 0, 20);
 
             AdminUserResponse response = result.getContent().get(0);
             assertThat(response.role()).isEqualTo(Role.CLIENT);
@@ -130,16 +136,18 @@ class AdminUserServiceTest {
             User suspended = buildLawyer(11L, "Lyon", false);
             suspended.setSuspendedReason("Plus de 5 annulations en 7 jours");
             suspended.setSuspendedAt(LocalDateTime.of(2026, 7, 1, 10, 0));
+            suspended.setSuspensionSource(SuspensionSource.ABUSE_DETECTION);
 
-            when(userRepository.search(any(), any(), any(), any(Pageable.class)))
+            when(userRepository.search(any(), any(), any(), any(), any(Pageable.class)))
                     .thenReturn(new PageImpl<>(List.of(suspended)));
 
-            Page<AdminUserResponse> result = adminUserService.searchUsers(null, false, null, 0, 20);
+            Page<AdminUserResponse> result = adminUserService.searchUsers(null, false, null, null, 0, 20);
 
             AdminUserResponse response = result.getContent().get(0);
             assertThat(response.enabled()).isFalse();
             assertThat(response.suspendedReason()).isEqualTo("Plus de 5 annulations en 7 jours");
             assertThat(response.suspendedAt()).isEqualTo(LocalDateTime.of(2026, 7, 1, 10, 0));
+            assertThat(response.suspensionSource()).isEqualTo(SuspensionSource.ABUSE_DETECTION);
         }
     }
 
@@ -150,32 +158,43 @@ class AdminUserServiceTest {
         @Test
         @DisplayName("tous les filtres null - délègue avec null partout, pas de valeur par défaut inventée")
         void searchUsers_allFiltersNull_passesNullThrough() {
-            when(userRepository.search(isNull(), isNull(), isNull(), any(Pageable.class)))
+            when(userRepository.search(isNull(), isNull(), isNull(), isNull(), any(Pageable.class)))
                     .thenReturn(new PageImpl<>(List.of()));
 
-            adminUserService.searchUsers(null, null, null, 0, 20);
+            adminUserService.searchUsers(null, null, null, null, 0, 20);
 
-            verify(userRepository).search(isNull(), isNull(), isNull(), any(Pageable.class));
+            verify(userRepository).search(isNull(), isNull(), isNull(), isNull(), any(Pageable.class));
         }
 
         @Test
-        @DisplayName("filtre role seul - enabled et city restent null")
+        @DisplayName("filtre role seul - enabled, city et suspensionSource restent null")
         void searchUsers_roleOnly_othersStayNull() {
-            when(userRepository.search(eq(Role.ADMIN), isNull(), isNull(), any(Pageable.class)))
+            when(userRepository.search(eq(Role.ADMIN), isNull(), isNull(), isNull(), any(Pageable.class)))
                     .thenReturn(new PageImpl<>(List.of()));
 
-            adminUserService.searchUsers(Role.ADMIN, null, null, 0, 20);
+            adminUserService.searchUsers(Role.ADMIN, null, null, null, 0, 20);
 
-            verify(userRepository).search(eq(Role.ADMIN), isNull(), isNull(), any(Pageable.class));
+            verify(userRepository).search(eq(Role.ADMIN), isNull(), isNull(), isNull(), any(Pageable.class));
+        }
+
+        @Test
+        @DisplayName("Sprint 7.8 - filtre suspensionSource transmis au repository")
+        void searchUsers_suspensionSourceFilter_passedThrough() {
+            when(userRepository.search(isNull(), eq(false), isNull(), eq(SuspensionSource.ABUSE_DETECTION), any(Pageable.class)))
+                    .thenReturn(new PageImpl<>(List.of()));
+
+            adminUserService.searchUsers(null, false, null, SuspensionSource.ABUSE_DETECTION, 0, 20);
+
+            verify(userRepository).search(isNull(), eq(false), isNull(), eq(SuspensionSource.ABUSE_DETECTION), any(Pageable.class));
         }
 
         @Test
         @DisplayName("aucun résultat - page vide, pas d'erreur")
         void searchUsers_noResults_returnsEmptyPage() {
-            when(userRepository.search(any(), any(), any(), any(Pageable.class)))
+            when(userRepository.search(any(), any(), any(), any(), any(Pageable.class)))
                     .thenReturn(new PageImpl<>(List.of()));
 
-            Page<AdminUserResponse> result = adminUserService.searchUsers(Role.LAWYER, true, "Nulle-Part", 0, 20);
+            Page<AdminUserResponse> result = adminUserService.searchUsers(Role.LAWYER, true, "Nulle-Part", null, 0, 20);
 
             assertThat(result.getContent()).isEmpty();
             assertThat(result.getTotalElements()).isZero();
@@ -189,13 +208,13 @@ class AdminUserServiceTest {
         @Test
         @DisplayName("transmet page et size tels que fournis quand size <= 50")
         void searchUsers_passesPageAndSize_whenWithinLimit() {
-            when(userRepository.search(any(), any(), any(), any(Pageable.class)))
+            when(userRepository.search(any(), any(), any(), any(), any(Pageable.class)))
                     .thenReturn(new PageImpl<>(List.of()));
 
-            adminUserService.searchUsers(null, null, null, 2, 30);
+            adminUserService.searchUsers(null, null, null, null, 2, 30);
 
             ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
-            verify(userRepository).search(any(), any(), any(), captor.capture());
+            verify(userRepository).search(any(), any(), any(), any(), captor.capture());
             assertThat(captor.getValue().getPageNumber()).isEqualTo(2);
             assertThat(captor.getValue().getPageSize()).isEqualTo(30);
         }
@@ -203,26 +222,26 @@ class AdminUserServiceTest {
         @Test
         @DisplayName("clampe la taille de page à 50 quand une valeur supérieure est demandée")
         void searchUsers_clampsPageSizeTo50() {
-            when(userRepository.search(any(), any(), any(), any(Pageable.class)))
+            when(userRepository.search(any(), any(), any(), any(), any(Pageable.class)))
                     .thenReturn(new PageImpl<>(List.of()));
 
-            adminUserService.searchUsers(null, null, null, 0, 500);
+            adminUserService.searchUsers(null, null, null, null, 0, 500);
 
             ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
-            verify(userRepository).search(any(), any(), any(), captor.capture());
+            verify(userRepository).search(any(), any(), any(), any(), captor.capture());
             assertThat(captor.getValue().getPageSize()).isEqualTo(50);
         }
 
         @Test
         @DisplayName("size exactement 50 n'est pas altéré (limite inclusive)")
         void searchUsers_exactlyFifty_notAltered() {
-            when(userRepository.search(any(), any(), any(), any(Pageable.class)))
+            when(userRepository.search(any(), any(), any(), any(), any(Pageable.class)))
                     .thenReturn(new PageImpl<>(List.of()));
 
-            adminUserService.searchUsers(null, null, null, 0, 50);
+            adminUserService.searchUsers(null, null, null, null, 0, 50);
 
             ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
-            verify(userRepository).search(any(), any(), any(), captor.capture());
+            verify(userRepository).search(any(), any(), any(), any(), captor.capture());
             assertThat(captor.getValue().getPageSize()).isEqualTo(50);
         }
     }
@@ -232,25 +251,26 @@ class AdminUserServiceTest {
     class DeactivateUser {
 
         @Test
-        @DisplayName("délègue à UserSuspensionService avec le motif fourni")
+        @DisplayName("délègue à UserSuspensionService avec le motif fourni et SuspensionSource.MANUAL")
         void deactivateUser_withReason_delegatesWithGivenReason() {
             User user = buildLawyer(10L, "Paris", true);
             when(userRepository.findById(10L)).thenReturn(java.util.Optional.of(user));
 
             adminUserService.deactivateUser(10L, "Comportement abusif signalé");
 
-            verify(userSuspensionService).suspendAccount(10L, "Comportement abusif signalé");
+            verify(userSuspensionService).suspendAccount(10L, "Comportement abusif signalé", SuspensionSource.MANUAL);
         }
 
         @Test
-        @DisplayName("motif absent (null) - applique le motif par défaut")
+        @DisplayName("motif absent (null) - applique le motif par défaut, toujours MANUAL")
         void deactivateUser_nullReason_appliesDefaultReason() {
             User user = buildLawyer(10L, "Paris", true);
             when(userRepository.findById(10L)).thenReturn(java.util.Optional.of(user));
 
             adminUserService.deactivateUser(10L, null);
 
-            verify(userSuspensionService).suspendAccount(10L, "Désactivé manuellement par un administrateur");
+            verify(userSuspensionService).suspendAccount(
+                    10L, "Désactivé manuellement par un administrateur", SuspensionSource.MANUAL);
         }
 
         @Test
@@ -261,7 +281,8 @@ class AdminUserServiceTest {
 
             adminUserService.deactivateUser(10L, "   ");
 
-            verify(userSuspensionService).suspendAccount(10L, "Désactivé manuellement par un administrateur");
+            verify(userSuspensionService).suspendAccount(
+                    10L, "Désactivé manuellement par un administrateur", SuspensionSource.MANUAL);
         }
 
         @Test

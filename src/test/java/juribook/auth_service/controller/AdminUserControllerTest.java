@@ -5,6 +5,7 @@ import juribook.auth_service.config.SecurityConfig;
 import juribook.auth_service.dto.response.AdminUserResponse;
 import juribook.auth_service.entity.LawyerStatus;
 import juribook.auth_service.entity.Role;
+import juribook.auth_service.entity.SuspensionSource;
 import juribook.auth_service.exception.UserNotFoundException;
 import juribook.auth_service.repository.UserRepository;
 import juribook.auth_service.security.JwtService;
@@ -56,8 +57,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * ⚠️ 403 (pas 401) pour une requête non authentifiée : SecurityConfig ne
  * déclare aucun AuthenticationEntryPoint personnalisé (pas de httpBasic/
  * formLogin), donc Spring Security retombe sur son comportement par
- * défaut pour une API stateless — Http403ForbiddenEntryPoint, qui renvoie
+ * défaut pour une API stateless, Http403ForbiddenEntryPoint, qui renvoie
  * 403 aussi bien pour "pas authentifié" que pour "rôle insuffisant".
+ *
+ * searchUsers/AdminUserResponse ont un paramètre
+ * suspensionSource supplémentaire, ajouté ici (isNull()/null selon le
+ * cas) sans changer la logique de test existante.
  */
 @WebMvcTest(AdminUserController.class)
 @Import(SecurityConfig.class)
@@ -99,7 +104,7 @@ class AdminUserControllerTest {
         return new AdminUserResponse(
                 10L, "Sophie Martin", "sophie.martin@example.com", "0600000000",
                 Role.LAWYER, true, "75001", "Droit du travail", "Paris",
-                LawyerStatus.APPROVED, null, null, LocalDateTime.now()
+                LawyerStatus.APPROVED, null, null, null, LocalDateTime.now()
         );
     }
 
@@ -137,7 +142,7 @@ class AdminUserControllerTest {
         @Test
         @DisplayName("✅ 200 - authentifié en ADMIN, autorisé")
         void search_adminRole_returns200() throws Exception {
-            when(adminUserService.searchUsers(any(), any(), any(), anyInt(), anyInt()))
+            when(adminUserService.searchUsers(any(), any(), any(), any(), anyInt(), anyInt()))
                     .thenReturn(new PageImpl<>(List.of()));
 
             mockMvc.perform(get("/api/admin/users").with(admin()))
@@ -146,7 +151,7 @@ class AdminUserControllerTest {
     }
 
     @Nested
-    @DisplayName("GET /api/admin/users — filtres et pagination")
+    @DisplayName("GET /api/admin/users - filtres et pagination")
     class SearchEndpoint {
 
         @Test
@@ -154,7 +159,7 @@ class AdminUserControllerTest {
         void search_delegatesToServiceAndReturns200WithBody() throws Exception {
             Page<AdminUserResponse> page = new PageImpl<>(
                     List.of(buildLawyerResponse()), PageRequest.of(0, 20), 1);
-            when(adminUserService.searchUsers(Role.LAWYER, true, "Paris", 0, 20)).thenReturn(page);
+            when(adminUserService.searchUsers(Role.LAWYER, true, "Paris", null, 0, 20)).thenReturn(page);
 
             mockMvc.perform(get("/api/admin/users")
                             .with(admin())
@@ -167,25 +172,25 @@ class AdminUserControllerTest {
                     .andExpect(jsonPath("$.content[0].city").value("Paris"))
                     .andExpect(jsonPath("$.content[0].role").value("LAWYER"));
 
-            verify(adminUserService).searchUsers(Role.LAWYER, true, "Paris", 0, 20);
+            verify(adminUserService).searchUsers(Role.LAWYER, true, "Paris", null, 0, 20);
         }
 
         @Test
         @DisplayName("aucun filtre fourni - délègue avec null partout et page=0/size=20 par défaut")
         void search_noFilters_defaultsPageAndSizePassNullFilters() throws Exception {
-            when(adminUserService.searchUsers(isNull(), isNull(), isNull(), eq(0), eq(20)))
+            when(adminUserService.searchUsers(isNull(), isNull(), isNull(), isNull(), eq(0), eq(20)))
                     .thenReturn(new PageImpl<>(List.of()));
 
             mockMvc.perform(get("/api/admin/users").with(admin()))
                     .andExpect(status().isOk());
 
-            verify(adminUserService).searchUsers(isNull(), isNull(), isNull(), eq(0), eq(20));
+            verify(adminUserService).searchUsers(isNull(), isNull(), isNull(), isNull(), eq(0), eq(20));
         }
 
         @Test
         @DisplayName("transmet page et size explicites")
         void search_explicitPageAndSize_passedThrough() throws Exception {
-            when(adminUserService.searchUsers(any(), any(), any(), eq(2), eq(10)))
+            when(adminUserService.searchUsers(any(), any(), any(), any(), eq(2), eq(10)))
                     .thenReturn(new PageImpl<>(List.of()));
 
             mockMvc.perform(get("/api/admin/users")
@@ -194,19 +199,34 @@ class AdminUserControllerTest {
                             .param("size", "10"))
                     .andExpect(status().isOk());
 
-            verify(adminUserService).searchUsers(isNull(), isNull(), isNull(), eq(2), eq(10));
+            verify(adminUserService).searchUsers(isNull(), isNull(), isNull(), isNull(), eq(2), eq(10));
         }
 
         @Test
         @DisplayName("filtre enabled=false seul (comptes suspendus)")
         void search_enabledFalseOnly_passedThrough() throws Exception {
-            when(adminUserService.searchUsers(isNull(), eq(false), isNull(), eq(0), eq(20)))
+            when(adminUserService.searchUsers(isNull(), eq(false), isNull(), isNull(), eq(0), eq(20)))
                     .thenReturn(new PageImpl<>(List.of()));
 
             mockMvc.perform(get("/api/admin/users").with(admin()).param("enabled", "false"))
                     .andExpect(status().isOk());
 
-            verify(adminUserService).searchUsers(isNull(), eq(false), isNull(), eq(0), eq(20));
+            verify(adminUserService).searchUsers(isNull(), eq(false), isNull(), isNull(), eq(0), eq(20));
+        }
+
+        @Test
+        @DisplayName("filtre suspensionSource=ABUSE_DETECTION combiné à enabled=false")
+        void search_abuseDetectionSuspensionSource_passedThrough() throws Exception {
+            when(adminUserService.searchUsers(isNull(), eq(false), isNull(), eq(SuspensionSource.ABUSE_DETECTION), eq(0), eq(20)))
+                    .thenReturn(new PageImpl<>(List.of()));
+
+            mockMvc.perform(get("/api/admin/users")
+                            .with(admin())
+                            .param("enabled", "false")
+                            .param("suspensionSource", "ABUSE_DETECTION"))
+                    .andExpect(status().isOk());
+
+            verify(adminUserService).searchUsers(isNull(), eq(false), isNull(), eq(SuspensionSource.ABUSE_DETECTION), eq(0), eq(20));
         }
 
         @Test
@@ -221,7 +241,7 @@ class AdminUserControllerTest {
         @Test
         @DisplayName("retourne 200 avec une page vide quand aucun résultat")
         void search_noResults_returns200WithEmptyPage() throws Exception {
-            when(adminUserService.searchUsers(any(), any(), any(), anyInt(), anyInt()))
+            when(adminUserService.searchUsers(any(), any(), any(), any(), anyInt(), anyInt()))
                     .thenReturn(new PageImpl<>(List.of()));
 
             mockMvc.perform(get("/api/admin/users").with(admin()).param("city", "Nulle-Part"))

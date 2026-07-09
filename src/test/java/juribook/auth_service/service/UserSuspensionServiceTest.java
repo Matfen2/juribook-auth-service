@@ -1,6 +1,7 @@
 package juribook.auth_service.service;
 
 import juribook.auth_service.entity.Role;
+import juribook.auth_service.entity.SuspensionSource;
 import juribook.auth_service.entity.User;
 import juribook.auth_service.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,6 +25,9 @@ import static org.mockito.Mockito.*;
  * Tests d'UserSuspensionService : réutilise le champ
  * `enabled` déjà existant sur User, pas un nouveau flag `suspended`.
  * Ajout de reactivateAccount, symétrique de suspendAccount.
+ *
+ * suspendAccount a un 3e paramètre SuspensionSource, tracé
+ * et effacé au même titre que suspendedReason/suspendedAt.
  */
 @ExtendWith(MockitoExtension.class)
 class UserSuspensionServiceTest {
@@ -53,12 +57,12 @@ class UserSuspensionServiceTest {
     class SuspendAccount {
 
         @Test
-        @DisplayName("cas nominal - désactive le compte et trace le motif/la date")
+        @DisplayName("cas nominal - désactive le compte et trace le motif/la date/la source")
         void suspendAccount_activeAccount_disablesAndRecordsMetadata() {
             when(userRepository.findById(USER_ID)).thenReturn(Optional.of(activeUser));
             when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
 
-            userSuspensionService.suspendAccount(USER_ID, REASON);
+            userSuspensionService.suspendAccount(USER_ID, REASON, SuspensionSource.ABUSE_DETECTION);
 
             ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
             verify(userRepository).save(captor.capture());
@@ -67,6 +71,18 @@ class UserSuspensionServiceTest {
             assertThat(saved.isEnabled()).isFalse();
             assertThat(saved.getSuspendedReason()).isEqualTo(REASON);
             assertThat(saved.getSuspendedAt()).isNotNull();
+            assertThat(saved.getSuspensionSource()).isEqualTo(SuspensionSource.ABUSE_DETECTION);
+        }
+
+        @Test
+        @DisplayName("MANUAL et LAWYER_REJECTION sont tracés tout aussi fidèlement")
+        void suspendAccount_manualAndLawyerRejectionSources_recordedCorrectly() {
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.of(activeUser));
+            when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            userSuspensionService.suspendAccount(USER_ID, "Désactivé manuellement par un administrateur", SuspensionSource.MANUAL);
+
+            assertThat(activeUser.getSuspensionSource()).isEqualTo(SuspensionSource.MANUAL);
         }
 
         @Test
@@ -75,7 +91,7 @@ class UserSuspensionServiceTest {
             activeUser.setEnabled(false);
             when(userRepository.findById(USER_ID)).thenReturn(Optional.of(activeUser));
 
-            userSuspensionService.suspendAccount(USER_ID, REASON);
+            userSuspensionService.suspendAccount(USER_ID, REASON, SuspensionSource.ABUSE_DETECTION);
 
             verify(userRepository, never()).save(any());
         }
@@ -85,7 +101,7 @@ class UserSuspensionServiceTest {
         void suspendAccount_userNotFound_doesNotThrow() {
             when(userRepository.findById(999L)).thenReturn(Optional.empty());
 
-            userSuspensionService.suspendAccount(999L, REASON);
+            userSuspensionService.suspendAccount(999L, REASON, SuspensionSource.ABUSE_DETECTION);
 
             verify(userRepository, never()).save(any());
         }
@@ -106,10 +122,11 @@ class UserSuspensionServiceTest {
             disabledUser.setEnabled(false);
             disabledUser.setSuspendedReason(REASON);
             disabledUser.setSuspendedAt(LocalDateTime.now().minusDays(2));
+            disabledUser.setSuspensionSource(SuspensionSource.ABUSE_DETECTION);
         }
 
         @Test
-        @DisplayName("cas nominal - réactive le compte et efface le motif/la date de suspension")
+        @DisplayName("cas nominal - réactive le compte et efface le motif/la date/la source de suspension")
         void reactivateAccount_disabledAccount_enablesAndClearsSuspensionMetadata() {
             when(userRepository.findById(USER_ID)).thenReturn(Optional.of(disabledUser));
             when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -123,6 +140,7 @@ class UserSuspensionServiceTest {
             assertThat(saved.isEnabled()).isTrue();
             assertThat(saved.getSuspendedReason()).isNull();
             assertThat(saved.getSuspendedAt()).isNull();
+            assertThat(saved.getSuspensionSource()).isNull();
         }
 
         @Test
