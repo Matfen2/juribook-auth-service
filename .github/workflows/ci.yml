@@ -92,6 +92,9 @@ jobs:
       - name: Install Scaleway CLI
         run: curl -s https://raw.githubusercontent.com/scaleway/scaleway-cli/master/scripts/get.sh | sh
 
+      - name: Create Scaleway config file
+        run: mkdir -p ~/.config/scw && touch ~/.config/scw/config.yaml
+
       - name: Configure Scaleway CLI
         run: |
           scw config set access-key="${{ secrets.SCW_ACCESS_KEY }}"
