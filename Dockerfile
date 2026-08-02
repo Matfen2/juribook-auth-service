@@ -1,6 +1,6 @@
 # ═══════════════════════════════════════════════════════════
-#  Dockerfile - juribook-auth-service
-#  Multi-stage build : build Maven → runtime JRE
+#  Dockerfile - juribook-auth-service (production)
+#  Multi-stage build : Maven → JRE Alpine, non-root, healthcheck
 # ═══════════════════════════════════════════════════════════
 
 # ── Étape 1 : Build avec Maven ────────────────────────────
@@ -16,14 +16,29 @@ RUN mvn dependency:go-offline -B
 COPY src ./src
 RUN mvn clean package -DskipTests -B
 
-# ── Étape 2 : Runtime avec JRE ───────────────────────────
-FROM eclipse-temurin:21-jre AS runtime
+# ── Étape 2 : Runtime, minimal et non-root ────────────────
+FROM eclipse-temurin:21-jre-alpine AS runtime
 WORKDIR /app
 
-# Copier uniquement le JAR généré (pas les sources ni Maven)
-COPY --from=build /app/target/*.jar app.jar
+# curl est nécessaire pour le healthcheck (absent par défaut sur
+# eclipse-temurin:*-jre-alpine). Utilisateur dédié, non-root — ne
+# jamais faire tourner un service en production avec les droits
+# root dans le conteneur.
+RUN apk add --no-cache curl && \
+    addgroup -S juribook && adduser -S juribook -G juribook
 
-# Port exposé par l'auth-service
+COPY --from=build --chown=juribook:juribook /app/target/*.jar app.jar
+
+USER juribook
+
 EXPOSE 8081
 
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# Définir les options JVM pour limiter l'utilisation de la mémoire à 75% de la mémoire disponible
+ENV JAVA_OPTS="-XX:MaxRAMPercentage=75.0"
+
+# Healthcheck pour vérifier que l'application est bien démarrée et répond
+HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8081/actuator/health || exit 1
+
+# Lancer l'application avec les options JVM définies dans JAVA_OPTS
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

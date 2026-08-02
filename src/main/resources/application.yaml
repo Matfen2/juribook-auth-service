@@ -30,15 +30,17 @@ spring:
     enabled: true
 
   # ═══════════════════════════════════════════════════════════
-  #  Kafka — désactivé en dev local (pas de broker disponible)
+  #  Kafka - désactivé en dev local (pas de broker disponible)
   #  En production Docker, réactiver en supprimant l'exclude
   #  et en passant SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092
   # ═══════════════════════════════════════════════════════════
   kafka:
     bootstrap-servers: localhost:9092
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    consumer:
+      group-id: auth-service-group
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
   autoconfigure:
     exclude:

@@ -1,15 +1,15 @@
 # juribook-auth-service
 
-Microservice d'authentification pour **JuriBook**, gestion des inscriptions, connexions, refresh tokens, protection des routes par rôle via JWT et validation admin des profils avocats.
+Microservice d'authentification pour **JuriBook**, gestion des inscriptions, connexions, refresh tokens, protection des routes par rôle via JWT, validation admin des profils avocats, gestion des comptes utilisateurs (recherche, désactivation, réactivation) et réaction automatique à la détection d'abus.
 
 ## Stack
 
 - Java 21 · Spring Boot 4.1.0 · Maven
 - Spring Security · JWT (JJWT 0.12.6) · BCrypt
 - PostgreSQL 16 · Flyway
-- Apache Kafka (producer - topic `audit-events`, désactivé en dev local)
+- Apache Kafka - **producer** (`lawyer-events`) **et consumer** (`abuse-events`)
 - Springdoc OpenAPI (Swagger UI)
-- JUnit 5 + Mockito (35 tests unitaires)
+- JUnit 5 + Mockito
 - Port : **8081**
 
 ## Structure du projet
@@ -22,14 +22,16 @@ src/main/java/juribook/auth_service/
 ├── controller/
 │   ├── AuthController.java           # POST /register, /register/lawyer, /login, /refresh, /logout
 │   ├── UserController.java           # GET /me, /lawyer-profile, /client-dashboard
-│   └── AdminController.java          # GET/PUT /api/admin/** - validation des profils avocats
+│   ├── AdminController.java          # GET/PUT /api/admin/lawyers/** - validation des profils avocats
+│   └── AdminUserController.java      # GET/PATCH /api/admin/users/** - recherche + suspension/réactivation
 ├── dto/
 │   ├── request/
 │   │   ├── LoginRequest.java
 │   │   ├── RegisterClientRequest.java
 │   │   ├── RegisterLawyerRequest.java
 │   │   ├── RefreshTokenRequest.java
-│   │   └── UpdateLawyerStatusRequest.java
+│   │   ├── UpdateLawyerStatusRequest.java
+│   │   └── DeactivateUserRequest.java        # record(reason)
 │   └── response/
 │       ├── LoginResponse.java
 │       ├── RegisterClientResponse.java
@@ -38,47 +40,64 @@ src/main/java/juribook/auth_service/
 │       ├── UserMeResponse.java               # record - réponse GET /me
 │       ├── LawyerProfileMeResponse.java      # record - réponse GET /lawyer-profile
 │       ├── ClientDashboardResponse.java      # record - réponse GET /client-dashboard
-│       └── LawyerAdminResponse.java          # réponse admin (liste + détail avocat)
+│       ├── LawyerAdminResponse.java          # réponse admin (liste + détail avocat)
+│       └── AdminUserResponse.java            # record - recherche admin, inclut les métadonnées de suspension
 ├── entity/
-│   ├── User.java                     # Entité JPA principale
+│   ├── User.java                     # Entité JPA principale - suspendedReason/suspendedAt/suspensionSource inclus
 │   ├── Role.java                     # Enum : CLIENT, LAWYER, ADMIN
 │   ├── LawyerStatus.java             # Enum : PENDING, APPROVED, REJECTED
+│   ├── SuspensionSource.java         # Enum : MANUAL, ABUSE_DETECTION, LAWYER_REJECTION
 │   └── RefreshToken.java             # Token de renouvellement de session (7 jours)
+├── event/
+│   ├── LawyerEventPublisher.java         # Interface - publishLawyerApproved/publishLawyerRejected
+│   ├── KafkaLawyerEventPublisher.java     # Impl unique, ObjectProvider<KafkaTemplate>, topic lawyer-events
+│   ├── AbuseEventConsumer.java            # @KafkaListener sur abuse-events - 1er consumer Kafka de ce service
+│   └── AbuseEvent.java                    # Miroir du payload publié par audit-service (abuse.detected)
 ├── exception/
 │   ├── GlobalExceptionHandler.java   # Handlers 400/404/409/500
 │   └── UserNotFoundException.java
 ├── filter/
 │   └── JwtAuthenticationFilter.java  # Filtre Spring Security (OncePerRequestFilter)
 ├── repository/
-│   ├── UserRepository.java           # + findByRole, findByRoleAndLawyerStatus, countByRole(...)
+│   ├── UserRepository.java           # + findByRole, findByRoleAndLawyerStatus, countByRole(...), search(...)
 │   └── RefreshTokenRepository.java
 ├── security/
 │   └── JwtService.java               # Génération et validation des tokens JWT
 └── service/
     ├── AuthService.java              # Logique métier inscription + login
     ├── RefreshTokenService.java      # Rotation des refresh tokens
-    └── AdminService.java             # Validation/refus des profils avocats, stats dashboard
+    ├── AdminService.java             # Validation/refus des profils avocats, stats dashboard, publie lawyer-events
+    ├── AdminUserService.java         # Recherche paginée + désactivation/réactivation d'un compte
+    └── UserSuspensionService.java    # Suspension/réactivation, origine tracée
 src/main/resources/
-├── application.yml                   # Kafka désactivé via spring.autoconfigure.exclude (dev local)
+├── application.yml                   # Kafka : producer + consumer désormais actifs (cf. Kafka ci-dessous)
 └── db/migration/
     ├── V1__create_users_table.sql
-    └── V2__create_refresh_tokens_table.sql
+    ├── V2__create_refresh_tokens_table.sql
+    ├── V3__add_suspended_to_users.sql        # suspended_reason, suspended_at
+    └── V4__add_suspension_source_to_users.sql # suspension_source
 src/test/java/juribook/auth_service/
 ├── AuthServiceApplicationTests.java  # Smoke test (sans @SpringBootTest)
 ├── controller/
-│   └── AuthControllerTest.java       # 13 tests - endpoints register, login, logout
+│   ├── AuthControllerTest.java
+│   └── AdminUserControllerTest.java  # Sécurité par rôle, filtres, pagination, deactivate/activate
 ├── security/
-│   └── JwtServiceTest.java           # 7 tests - génération, validation, claims
+│   └── JwtServiceTest.java
+├── event/
+│   └── AbuseEventConsumerTest.java    # Propagation de SuspensionSource.ABUSE_DETECTION
 └── service/
-    ├── AuthServiceTest.java          # 12 tests - inscription, login, anti-énumération
-    └── RefreshTokenServiceTest.java  # 6 tests - rotation, révocation, expiration
+    ├── AuthServiceTest.java
+    ├── RefreshTokenServiceTest.java
+    ├── AdminServiceTest.java          # + suspendAccount taggé LAWYER_REJECTION
+    ├── AdminUserServiceTest.java      # + suspendAccount taggé MANUAL, filtre suspensionSource
+    └── UserSuspensionServiceTest.java # + traçage/effacement de suspensionSource
 src/test/resources/
 └── application-test.yml              # H2 en mémoire + Flyway désactivé pour CI
 ```
 
-> **Note CORS** — Le CORS est configuré directement dans `SecurityConfig` via `.cors(cors -> cors.configurationSource(...))`, sans bean `CorsFilter` séparé. Un `CorsFilter` externe entre en conflit avec `SecurityFilterChain` dans Spring Boot 4 et empêche son chargement (symptôme : `inMemoryUserDetailsManager` au démarrage à la place des règles de `SecurityConfig`).
+> **Note CORS** - Le CORS est configuré directement dans `SecurityConfig` via `.cors(cors -> cors.configurationSource(...))`, sans bean `CorsFilter` séparé. Un `CorsFilter` externe entre en conflit avec `SecurityFilterChain` dans Spring Boot 4 et empêche son chargement (symptôme : `inMemoryUserDetailsManager` au démarrage à la place des règles de `SecurityConfig`).
 
-> **Note DTOs** — Les réponses de `UserController` utilisent des `record` typés (`UserMeResponse`, `LawyerProfileMeResponse`, `ClientDashboardResponse`) plutôt que des `Map<String, Object>`, pour un contrat d'API sûr à la compilation et une documentation Swagger correcte.
+> **Note DTOs** - Les réponses de `UserController` utilisent des `record` typés (`UserMeResponse`, `LawyerProfileMeResponse`, `ClientDashboardResponse`) plutôt que des `Map<String, Object>`, pour un contrat d'API sûr à la compilation et une documentation Swagger correcte. `AdminUserResponse` suit le même principe.
 
 ## Lancer les tests
 
@@ -86,20 +105,18 @@ src/test/resources/
 mvn test
 ```
 
-```
-Tests run: 35, Failures: 0, Errors: 0, Skipped: 0
-BUILD SUCCESS
-```
+> Le nombre exact de tests a grandi (suspension, recherche admin, consumer Kafka), vérifie la sortie de `mvn test` plutôt que de te fier à un chiffre figé ici.
 
 ## Lancer en local (hors Docker)
 
 ```bash
 # Prérequis : PostgreSQL sur localhost:5432 avec la base authdb
-# Kafka est exclu par défaut en dev local (voir application.yml)
+# Kafka doit être actif : ce service consomme désormais abuse-events
+# en plus de produire sur lawyer-events
 mvn clean spring-boot:run
 ```
 
-> ⚠️ Toujours utiliser `mvn clean spring-boot:run` après une modification de `SecurityConfig`, `JwtAuthenticationFilter` ou tout fichier de `config/` — Maven peut réutiliser un bytecode obsolète sans `clean`, ce qui provoque silencieusement le rejet de la configuration de sécurité.
+> ⚠️ Toujours utiliser `mvn clean spring-boot:run` après une modification de `SecurityConfig`, `JwtAuthenticationFilter` ou tout fichier de `config/`, Maven peut réutiliser un bytecode obsolète sans `clean`, ce qui provoque silencieusement le rejet de la configuration de sécurité.
 
 ## Lancer via Docker Compose
 
@@ -138,7 +155,7 @@ docker compose up -d postgres-auth auth-service
 | `GET` | `/api/users/lawyer-profile` | `LAWYER` | Profil avocat |
 | `GET` | `/api/users/client-dashboard` | `CLIENT` | Dashboard client |
 
-### Administration (rôle ADMIN requis)
+### Administration - profils avocats (rôle ADMIN requis)
 
 | Méthode | URL | Description |
 |---|---|---|
@@ -146,8 +163,16 @@ docker compose up -d postgres-auth auth-service
 | `GET` | `/api/admin/lawyers/pending` | Liste les avocats en attente de validation |
 | `GET` | `/api/admin/lawyers/by-status?status=APPROVED` | Liste les avocats par statut |
 | `GET` | `/api/admin/lawyers/{id}` | Détail d'un profil avocat |
-| `PUT` | `/api/admin/lawyers/{id}/status` | Valider (`APPROVED`) ou refuser (`REJECTED`) un avocat |
+| `PUT` | `/api/admin/lawyers/{id}/status` | Valider (`APPROVED`) ou refuser (`REJECTED`) un avocat - publie `lawyer.approved`/`lawyer.rejected` |
 | `GET` | `/api/admin/stats` | Compteurs dashboard (pending, approved, rejected, clients) |
+
+### Administration - gestion des comptes (rôle ADMIN requis)
+
+| Méthode | URL | Description |
+|---|---|---|
+| `GET` | `/api/admin/users` | Recherche paginée - filtres cumulables optionnels : `role`, `enabled`, `city`, `suspensionSource` |
+| `PATCH` | `/api/admin/users/{id}/deactivate` | Désactive un compte (motif optionnel dans le corps), tracé `SuspensionSource.MANUAL` |
+| `PATCH` | `/api/admin/users/{id}/activate` | Réactive un compte, efface le motif/date/origine de suspension |
 
 ---
 
@@ -240,7 +265,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9...
 GET http://localhost:8081/api/users/me
 Authorization: Bearer <token>
 ```
-Réponse — 200 :
+Réponse - 200 :
 ```json
 {
     "id": 1,
@@ -255,7 +280,7 @@ Réponse — 200 :
 GET http://localhost:8081/api/users/lawyer-profile
 Authorization: Bearer <token_avocat>
 ```
-Réponse — 200 (LAWYER) :
+Réponse - 200 (LAWYER) :
 ```json
 {
     "id": 2,
@@ -272,7 +297,7 @@ Réponse — 200 (LAWYER) :
 GET http://localhost:8081/api/users/client-dashboard
 Authorization: Bearer <token_client>
 ```
-Réponse — 200 (CLIENT) :
+Réponse - 200 (CLIENT) :
 ```json
 {
     "id": 1,
@@ -321,7 +346,7 @@ Content-Type: application/json
     "status": "APPROVED"
 }
 ```
-Effet : `lawyerStatus` passe à `APPROVED`, `enabled` passe à `true` (déjà `true` par défaut mais réaffirmé).
+Effet : `lawyerStatus` passe à `APPROVED`, réactive le compte (`reactivateAccount` - efface un éventuel motif/origine de suspension antérieur), publie `lawyer.approved` sur `lawyer-events`.
 
 #### Refuser un avocat
 ```json
@@ -334,7 +359,7 @@ Content-Type: application/json
     "reason": "Numéro de barreau non vérifiable"
 }
 ```
-Effet : `lawyerStatus` passe à `REJECTED`, `enabled` passe à `false` — l'avocat ne peut plus se connecter.
+Effet : `lawyerStatus` passe à `REJECTED`, le compte est suspendu (`suspendAccount` avec `SuspensionSource.LAWYER_REJECTION`, motif tracé) - l'avocat ne peut plus se connecter. Publie `lawyer.rejected` sur `lawyer-events`.
 
 #### Stats dashboard
 ```
@@ -353,19 +378,132 @@ Réponse — 200 :
 
 ---
 
+### Administration - gestion des comptes
+
+#### Rechercher des utilisateurs (filtres cumulables, tous optionnels)
+```
+GET http://localhost:8081/api/admin/users?role=CLIENT&enabled=false&suspensionSource=ABUSE_DETECTION&page=0&size=20
+Authorization: Bearer <token_admin>
+```
+Réponse - 200 :
+```json
+{
+    "content": [
+        {
+            "id": 12,
+            "name": "Marc Lefèvre",
+            "email": "marc.lefevre@example.com",
+            "phone": null,
+            "role": "CLIENT",
+            "enabled": false,
+            "barNumber": null,
+            "specialty": null,
+            "city": null,
+            "lawyerStatus": null,
+            "suspendedReason": "Plus de 5 annulations en 7 jours",
+            "suspendedAt": "2026-07-09T20:43:40.512246",
+            "suspensionSource": "ABUSE_DETECTION",
+            "createdAt": "2026-07-01T09:00:00"
+        }
+    ],
+    "totalElements": 1,
+    "totalPages": 1,
+    "size": 20,
+    "number": 0
+}
+```
+
+> `suspensionSource=ABUSE_DETECTION` combiné à `enabled=false` isole précisément les comptes suspendus **automatiquement** par détection d'abus, par opposition à une désactivation manuelle (`MANUAL`) ou un refus de profil avocat (`LAWYER_REJECTION`) — les trois passent par le même `UserSuspensionService.suspendAccount`, seule cette colonne les distingue de façon fiable.
+
+#### Désactiver un compte manuellement
+```json
+PATCH http://localhost:8081/api/admin/users/12/deactivate
+Authorization: Bearer <token_admin>
+Content-Type: application/json
+
+{
+    "reason": "Comportement inapproprié signalé par un avocat"
+}
+```
+Effet : `enabled` passe à `false`, `suspendedReason`/`suspendedAt` tracés, `suspensionSource = MANUAL`. Motif optionnel, par défaut : *"Désactivé manuellement par un administrateur"*. N'invalide pas un JWT déjà émis (reste valide jusqu'à expiration naturelle, 24h max).
+
+#### Réactiver un compte
+```
+PATCH http://localhost:8081/api/admin/users/12/activate
+Authorization: Bearer <token_admin>
+```
+Réponse - 200 :
+```json
+{
+    "id": 12,
+    "enabled": true,
+    "suspendedReason": null,
+    "suspendedAt": null,
+    "suspensionSource": null
+}
+```
+Efface entièrement le motif/date/origine, un compte réactivé ne garde aucune trace de sa dernière suspension.
+
+---
+
 ## Codes HTTP retournés
 
 | Code | Cas |
 |---|---|
 | 201 | Inscription réussie |
-| 200 | Login, consultation ou validation admin réussis |
+| 200 | Login, consultation, validation admin, recherche/désactivation/réactivation de compte réussis |
 | 204 | Logout réussi |
 | 400 | Données invalides (champ manquant, format incorrect, statut admin invalide) |
 | 401 | Token absent ou invalide |
 | 403 | Rôle insuffisant (ex : CLIENT sur une route ADMIN) |
-| 404 | Utilisateur introuvable (email/mot de passe incorrect, ou avocat introuvable côté admin) |
+| 404 | Utilisateur introuvable (email/mot de passe incorrect, avocat introuvable côté admin, ou id inconnu sur deactivate/activate) |
 | 409 | Email ou numéro de barreau déjà utilisé |
 | 500 | Erreur inattendue |
+
+---
+
+## Suspension d'un compte - origine tracée
+
+Un compte suspendu a `enabled = false`. Trois origines possibles, toutes tracées par les mêmes colonnes (`suspendedReason`, `suspendedAt`, `suspensionSource`) via l'unique point d'entrée `UserSuspensionService.suspendAccount(userId, reason, source)` :
+
+| `SuspensionSource` | Déclencheur | Motif typique |
+|---|---|---|
+| `MANUAL` | `AdminUserService.deactivateUser` | Motif libre saisi par l'admin |
+| `ABUSE_DETECTION` | `AbuseEventConsumer`, suite à `abuse.detected` reçu d'`audit-service` | `"Plus de 5 annulations en 7 jours"` / `"Plus de 3 avis 1-étoile en 24h"` (constantes fixes) |
+| `LAWYER_REJECTION` | `AdminService.updateLawyerStatus`, branche `REJECTED` | Motif libre ou *"Profil avocat refusé par l'administrateur"* |
+
+`reactivateAccount` efface les trois colonnes d'un coup, quelle qu'ait été l'origine, un compte réactivé ne garde aucune trace de sa dernière suspension.
+
+⚠️ **N'invalide pas un JWT déjà émis** : un token émis avant la désactivation reste valide jusqu'à son expiration naturelle (24h max), aucune liste de révocation partagée entre les 6 services. Le blocage n'est effectif qu'à la **prochaine tentative de connexion** (`AuthService.login` vérifie `enabled`).
+
+⚠️ **`suspendAccount`/`reactivateAccount` échouent silencieusement** (log, pas d'exception) si l'utilisateur n'existe pas, comportement voulu pour l'usage Kafka (`AbuseEventConsumer`, un `actorId` invalide ne doit jamais faire planter le consumer). L'usage admin (`AdminUserService`) fait sa propre vérification d'existence en amont pour renvoyer un 404 explicite.
+
+---
+
+## Kafka
+
+### Ce que ce service consomme
+
+| Topic | Consumer | Événement | Effet |
+|---|---|---|---|
+| `abuse-events` | `AbuseEventConsumer` | `abuse.detected` | `suspendAccount(actorId, reason, SuspensionSource.ABUSE_DETECTION)` |
+
+Premier consumer Kafka de ce service, qui n'avait fait que produire (`audit-events`) jusqu'ici.
+
+### Ce que ce service produit
+
+| Topic | Événement | Déclencheur |
+|---|---|---|
+| `lawyer-events` | `lawyer.approved` | `PUT /api/admin/lawyers/{id}/status` avec `APPROVED` (Sprint 7.3) |
+| `lawyer-events` | `lawyer.rejected` | Idem avec `REJECTED`, `reason` inclus dans le payload |
+
+⚠️ **Topic partagé avec un usage préexistant différent** : `lawyer-events` porte aussi `lawyer.status-changed`, publié par `lawyer-service` sur un changement de disponibilité (`Lawyer.available`), un concept distinct de la validation admin (`User.lawyerStatus`, ce service). Les deux cohabitent sans collision, chaque consommateur filtre par `eventType`.
+
+⚠️ **`lawyerId` du payload = `User.id` (ce service), PAS `Lawyer.id` (lawyer-service)**, deux espaces d'identifiants distincts, reliés uniquement via `Lawyer.authUserId`. Choisi pour rester compatible avec l'extraction d'acteur déjà en place dans `AuditService` (qui reconnaît `clientId`/`lawyerId`), pas pour désigner un `Lawyer.id` réel.
+
+### Activation
+
+`KafkaLawyerEventPublisher` décide **à l'exécution** si Kafka est disponible, via `ObjectProvider<KafkaTemplate<String, String>>`, même pattern que tous les autres publishers du projet, jamais `@ConditionalOnBean` (piège d'ordre de scan vs autoconfiguration Spring Boot, déjà rencontré et documenté côté `booking-service`).
 
 ---
 
@@ -379,20 +517,21 @@ docker exec -it juribook-postgres-auth psql -U juribook -d authdb
 
 > ⚠️ Pour insérer un hash BCrypt en une commande `-c` depuis PowerShell, le `$` peut être interprété comme une variable shell et tronquer le hash. Préférer le mode interactif (`docker exec -it ... psql -U juribook -d authdb` puis coller la requête directement dans le prompt `authdb=#`).
 
-### Créer un compte ADMIN (mot de passe : `motdepasse123`)
+### Créer un compte ADMIN
 
 ```sql
 INSERT INTO users (name, email, password, role, enabled, created_at, updated_at)
 VALUES (
   'Admin JuriBook',
   'admin@juribook.fr',
-  '$2b$10$K6Fs7CHCaGkVMfdkU4k/wuE/NyCAD4wbNBEshiBIU5CuSIkOxOGqu',
+  '$2a$10$K6Fs7CHCaGkVMfdkU4k/wuE/NyCAD4wbNBEshiBIU5CuSIkOxOGqu',
   'ADMIN',
   true,
   NOW(),
   NOW()
 );
 ```
+> ⚠️ Le préfixe du hash BCrypt doit être `$2a$`, pas `$2b$`, un hash généré par une lib externe (ex: Python `bcrypt`) produit souvent `$2b$`, fonctionnellement identique pour un mot de passe de longueur normale, mais a déjà causé un `500 Internal Server Error` sur `/login` plutôt qu'un rejet propre. `$2a$`/`$2b$` sont interchangeables en remplaçant simplement le préfixe si besoin.
 
 ### Lister tous les utilisateurs
 
@@ -418,6 +557,18 @@ docker exec -it juribook-postgres-auth psql -U juribook -d authdb -c "SELECT id,
 docker exec -it juribook-postgres-auth psql -U juribook -d authdb -c "SELECT id, name, email, bar_number, specialty, city, lawyer_status FROM users WHERE role = 'LAWYER' AND lawyer_status = 'PENDING';"
 ```
 
+### Lister les comptes suspendus, avec leur origine (Sprint 7.8)
+
+```bash
+docker exec -it juribook-postgres-auth psql -U juribook -d authdb -c "SELECT id, name, email, suspended_reason, suspended_at, suspension_source FROM users WHERE enabled = false ORDER BY suspended_at DESC;"
+```
+
+### Ne voir que les suspensions automatiques (détection d'abus)
+
+```bash
+docker exec -it juribook-postgres-auth psql -U juribook -d authdb -c "SELECT id, name, email, suspended_reason, suspended_at FROM users WHERE enabled = false AND suspension_source = 'ABUSE_DETECTION';"
+```
+
 ### Vérifier les refresh tokens actifs
 
 ```bash
@@ -434,6 +585,12 @@ docker exec -it juribook-postgres-auth psql -U juribook -d authdb -c "SELECT ema
 
 ```bash
 docker exec -it juribook-postgres-auth psql -U juribook -d authdb -c "SELECT role, COUNT(*) FROM users GROUP BY role;"
+```
+
+### Compter les suspensions par origine
+
+```bash
+docker exec -it juribook-postgres-auth psql -U juribook -d authdb -c "SELECT suspension_source, COUNT(*) FROM users WHERE enabled = false GROUP BY suspension_source;"
 ```
 
 ### Supprimer un utilisateur de test
@@ -468,9 +625,9 @@ docker exec -it juribook-postgres-auth psql -U juribook -d authdb -c "SELECT ver
 |---|---|---|
 | `CLIENT` | Particulier cherchant un avocat | Recherche, réservation, avis |
 | `LAWYER` | Avocat inscrit (validé par admin) | Gestion profil, disponibilités, rendez-vous |
-| `ADMIN` | Administrateur plateforme | Tout + validation avocats + audit |
+| `ADMIN` | Administrateur plateforme | Tout + validation avocats + gestion des comptes + audit |
 
-> ⚠️ Un avocat nouvellement inscrit a le statut `PENDING`, il ne peut pas accéder aux routes `LAWYER` tant que l'admin ne l'a pas validé (`APPROVED`). Un avocat `REJECTED` a `enabled = false` et ne peut plus se connecter du tout.
+> ⚠️ Un avocat nouvellement inscrit a le statut `PENDING`, il ne peut pas accéder aux routes `LAWYER` tant que l'admin ne l'a pas validé (`APPROVED`). Un avocat `REJECTED` a `enabled = false` (`SuspensionSource.LAWYER_REJECTION`) et ne peut plus se connecter du tout.
 
 ---
 
@@ -485,3 +642,11 @@ Token expiré    → 400 Refresh token expiré, veuillez vous reconnecter
 ```
 
 La **rotation** est obligatoire : chaque utilisation d'un refresh token révoque l'ancien et en génère un nouveau. Si un token déjà consommé est réutilisé, c'est un signal de vol détecté.
+
+---
+
+## Limites connues
+
+- **Aucune invalidation de JWT déjà émis** à la suspension d'un compte (cf. section dédiée), reste valide jusqu'à expiration naturelle (24h max), aucune liste de révocation partagée entre les 6 services.
+- **`enabled`/`suspendedReason`/`suspendedAt`/`suspensionSource` sont de simples colonnes sur `User`**, pas une table d'historique séparée : une nouvelle suspension écrase silencieusement les métadonnées de la précédente (pas un problème pratique à ce stade, mais aucun historique des suspensions passées n'est conservé au-delà de la dernière).
+- **`AbuseEventConsumer` fait confiance à l'`actorId` reçu** sans revalidation contre `audit-service`, cohérent avec le principe "database per service", mais signifie qu'un message Kafka malformé avec un `actorId` erroné suspendrait le mauvais compte s'il existe (échoue silencieusement seulement si l'id n'existe pas du tout).

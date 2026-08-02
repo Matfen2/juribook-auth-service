@@ -1,0 +1,3 @@
+ALTER TABLE users ADD COLUMN suspended BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN suspended_reason VARCHAR(200);
+ALTER TABLE users ADD COLUMN suspended_at TIMESTAMP;

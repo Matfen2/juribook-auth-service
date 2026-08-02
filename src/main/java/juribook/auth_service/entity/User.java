@@ -65,4 +65,17 @@ public class User {
     protected void onUpdate() {
         this.updatedAt = LocalDateTime.now();
     }
+
+    @Column(name = "suspended_reason", length = 200)
+    private String suspendedReason;
+ 
+    @Column(name = "suspended_at")
+    private LocalDateTime suspendedAt;
+
+    // null si le compte n'a jamais été suspendu. Distingue une
+    // suspension automatique (détection d'abus) d'une action admin
+    // explicite (désactivation manuelle ou refus de profil avocat).
+    @Enumerated(EnumType.STRING)
+    @Column(name = "suspension_source", length = 20)
+    private SuspensionSource suspensionSource;
 }
